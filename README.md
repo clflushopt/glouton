@@ -41,3 +41,12 @@ The IR used is a custom design based on [Bril](https://www.cs.cornell.edu/course
 
 ### Optimizations and Program Analysis
 
+## Resources
+
+I recommend checking out the official CMU class
+[here](https://www.cs.cmu.edu/afs/cs/academic/class/15411-f20/www/schedule.html) and the
+lecture notes from Rice University [Comp 512](https://www.clear.rice.edu/comp512/).
+
+Other resources include the Stanford [CS6120 Self Guided
+Course](https://www.cs.cornell.edu/courses/cs6120/2022sp/self-guided/) and most importantly
+the book Engineering a Compiler.
