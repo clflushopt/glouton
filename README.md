@@ -1,52 +1,32 @@
-# Glouton
+# Glouton: an optimizing compiler playground for C0
 
-Glouton is an optmizing compiler for the C0 language a safe subset of C.
+Glouton is an optimizing compiler playground for the C0 language, it serves
+as a reference for how to implement an optmizing compiler with a focus on
+the middle and backend parts of a compiler.
+
+Glouton exposes two different IRs, one that uses a Graph based IR to construct
+a Control Flow Graph and one that uses a Sea of Nodes based IR. In both cases
+the intermediate representations follow SSA form.
+
+Currently the goal of Glouton is to implement all the optimizations in the paper
+by Frances Allen (A Catalog of Optimizing Transformations).
 
 ## C0
 
-C0 is a safe subset of the C language designed at CMU for their freshman class
-and [compilers course](https://www.cs.cmu.edu/afs/cs/academic/class/15411-f20/www/index.html).
+C0 is a safe subset of C you can find out more in the [official website](https://c0.cs.cmu.edu/).
 
-You can find more information about C0 in the official [website](https://c0.cs.cmu.edu/).
+## Docs
 
-## Usage
+I tried to document a lot of the features and design decisions for the frontend
+and backends of the compiler with a specific focus on **how** to build the IR
+and how to accomplish the code generation passses (instruction selection, scheduling
+and register allocation...).
 
-Glouton is written in Rust and you can build the compiler drive using `cargo build`.
+- [Frontend: Design of the scanner and parser](docs/frontend.md)
+- [IR: Building a control flow graph from the AST](docs/cfg.md)
+- [IR: Building a sea of nodes from the AST](docs/sea.md)
+- [Optimizations: Transforms and Passes approach](docs/optimizations.md)
+- [Optimizations: Catalogue of optimizations (in details)](docs/optimref.md)
+- [Backend: The first steps towrads a code generator](docs/codegen.md)
+- [Backend: Instruction selection, scheduling and register allocation](docs/backend.md)
 
-```sh
-
-$ cargo build --release
-
-$ ./target/release/gloutonc file.c0 -o bi
-
-```
-
-The compiler driver will try and use the default `gcc` linker `ld`.
-
-## Architecture
-
-### Lexer and Parser
-
-Both the lexer and parser are hand written, the lexer is a straight forward tokenizer
-and the parser is an implementation of a top down precedence (Pratt) parser.
-
-### SSA Construction
-
-SSA construction uses the approach described in [Simple and Efficient Construction
-of Static Single Assignment Form](http://individual.utoronto.ca/dfr/ece467/braun13.pdf).
-
-### IR
-
-The IR used is a custom design based on [Bril](https://www.cs.cornell.edu/courses/cs6120/2022sp/)
-
-### Optimizations and Program Analysis
-
-## Resources
-
-I recommend checking out the official CMU class
-[here](https://www.cs.cmu.edu/afs/cs/academic/class/15411-f20/www/schedule.html) and the
-lecture notes from Rice University [Comp 512](https://www.clear.rice.edu/comp512/).
-
-Other resources include the Stanford [CS6120 Self Guided
-Course](https://www.cs.cornell.edu/courses/cs6120/2022sp/self-guided/) and most importantly
-the book Engineering a Compiler.
