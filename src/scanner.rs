@@ -155,10 +155,10 @@ impl Scanner<'_> {
             self.next();
         }
 
-        let s = self.source[self.start..self.cursor]
+        let int_literal = self.source[self.start..self.cursor]
             .iter()
             .collect::<String>();
-        let value = s.as_str().parse::<i32>().unwrap();
+        let value = int_literal.as_str().parse::<i32>().unwrap();
         Token::IntLiteral(value)
     }
 
@@ -174,10 +174,10 @@ impl Scanner<'_> {
         // Consume closing quote
         self.next();
         // Trim surrounding quotes and build the string literal.
-        let s = self.source[self.start + 1..self.cursor - 1]
+        let str_literal = self.source[self.start + 1..self.cursor - 1]
             .iter()
             .collect::<String>();
-        Token::StringLiteral(s)
+        Token::StringLiteral(str_literal)
     }
     // Scan literal characters enclosed in single quotes.
     fn char(&mut self) -> Token {
@@ -187,8 +187,8 @@ impl Scanner<'_> {
         // Consume closing quote.
         self.next();
         // Trim surrounding quotes and build the char literal.
-        let c = self.source[self.start + 1];
-        Token::CharLiteral(c)
+        let char_literal = self.source[self.start + 1];
+        Token::CharLiteral(char_literal)
     }
 
     // Scan identifiers.
