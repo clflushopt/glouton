@@ -1,10 +1,54 @@
-//! Recursive descent parser that uses Pratt's approach for parsing expressions.
-//!
 //! The nice thing about this implementation is that it builds a purely flat
 //! AST that uses arenas and handles to represent the tree.
 
-use crate::ast::{Expr, ExprRef, Stmt, StmtRef, AST};
+use crate::ast::{BinaryOperator, Expr, ExprRef, Stmt, StmtRef, UnaryOperator, AST};
 use crate::token::Token;
+
+/// Operator precedence tablet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum Precedence {
+    // Unspecified precedence (shouldn't exist in theory).
+    None = 0,
+    // Assignment is the lowest precedence level, since we assign to a variable
+    // only after evaluating the entire rhs.
+    Assignment = 1,
+    // Logical OR (||) has lower precedence than Logical (AND).
+    Or = 2,
+    And = 3,
+    Equal = 4,
+    Comparison = 5,
+    Term = 6,
+    Factor = 7,
+    Unary = 8,
+    Call = 9,
+    Primary = 10,
+}
+
+impl From<u8> for Precedence {
+    fn from(prec: u8) -> Self {
+        match prec {
+            0 => Self::None,
+            1 => Self::Assignment,
+            2 => Self::Or,
+            3 => Self::And,
+            4 => Self::Equal,
+            5 => Self::Comparison,
+            6 => Self::Term,
+            7 => Self::Factor,
+            8 => Self::Unary,
+            9 => Self::Call,
+            10 => Self::Primary,
+            _ => unreachable!("Unexpected `from({prec})` no matching variant for {prec}"),
+        }
+    }
+}
+
+impl From<Precedence> for u8 {
+    fn from(prec: Precedence) -> Self {
+        prec as u8
+    }
+}
 
 /// Parser implements a recursive descent Pratt style parser.
 pub struct Parser {
@@ -34,6 +78,13 @@ impl Parser {
     /// Parse the input and construct an AST.
     pub fn parse(&mut self) {
         // Parse the statements that constitute our program.
+        // FIXME: C0 programs are sequence of declarations (or definitions).
+        //
+        // The BNF is :
+        // declaration ->
+        //             | funcDecl
+        //             | varDecl
+        //             | statement;
         while !self.eof() {
             let statement = self.statement();
             self.ast.push_stmt(statement);
@@ -51,33 +102,116 @@ impl Parser {
     }
 
     /// Parse an expression.
-    fn expression(&mut self) -> Expr {
+    fn expression(&mut self) -> ExprRef {
+        println!("Current AST expression: {:?}", self.ast);
+        self.precedence(Precedence::Assignment)
+        /*
         match self.consume() {
             Token::IntLiteral(value) => {
                 return Expr::IntLiteral(*value);
             }
             _ => todo!("Unsupprted expression"),
         }
+        */
+    }
+
+    /// Parse an expression by its precedence level.
+    fn precedence(&mut self, prec: Precedence) -> ExprRef {
+        // Prefix part.
+        let mut prefix_ref = match self.consume() {
+            &Token::LParen => self.grouping(),
+            &Token::Minus => self.unary(),
+            &Token::Bang => self.unary(),
+            &Token::IntLiteral(value) => {
+                let literal_expr = Expr::IntLiteral(value);
+                self.ast.push_expr(literal_expr)
+            }
+            _ => todo!("Unexpected prefix token {}", self.prev()),
+        };
+
+        while prec <= self.tok_precedence(self.peek()) {
+            let infix_ref = match self.consume() {
+                &Token::Plus => self.binary(prefix_ref),
+                &Token::Minus => self.binary(prefix_ref),
+                &Token::Star => self.binary(prefix_ref),
+                &Token::Slash => self.binary(prefix_ref),
+                _ => todo!("Unexpected infix token {}", self.peek()),
+            };
+
+            prefix_ref = infix_ref;
+        }
+
+        prefix_ref
+    }
+
+    /// Parse a binary expression.
+    fn binary(&mut self, left: ExprRef) -> ExprRef {
+        let operator = match self.prev() {
+            &Token::Plus => BinaryOperator::Add,
+            &Token::Minus => BinaryOperator::Sub,
+            &Token::Star => BinaryOperator::Mul,
+            &Token::Slash => BinaryOperator::Div,
+            // There is no infix operator.
+            _ => unreachable!("Unknown token in binary expression {}", self.peek()),
+        };
+        let precedence = (self.tok_precedence(self.prev()) as u8 + 1).into();
+        let right = self.precedence(precedence);
+        self.ast.push_expr(Expr::BinOp {
+            left,
+            operator,
+            right,
+        })
+    }
+
+    /// Parse a grouping expression.
+    fn grouping(&mut self) -> ExprRef {
+        // Parse the grouped expression (inside the parenthesis).
+        let expr_ref = self.expression();
+        // Consume the closing parenthesis.
+        self.eat(&Token::RParen);
+        // Push the expression to pool and return a ref to it.
+        self.ast.push_expr(Expr::Grouping(expr_ref))
+    }
+
+    /// Parse a unary expression.
+    fn unary(&mut self) -> ExprRef {
+        // Grab the operator.
+        let operator = match self.prev() {
+            &Token::Minus => UnaryOperator::Neg,
+            &Token::Bang => UnaryOperator::Not,
+            _ => unreachable!("Unexpected unary operator {}", self.prev()),
+        };
+
+        // Parse the operand.
+        let operand = self.precedence(Precedence::Unary);
+        // Push the grouping expression to the pool.
+        self.ast.push_expr(Expr::UnaryOp { operator, operand })
     }
 
     /// Parse a return statement.
     fn return_stmt(&mut self) -> Stmt {
-        let expr = self.expression();
+        let expr_ref = self.expression();
         self.eat(&Token::SemiColon);
-        // Push the expression to the AST.
-        let expr_ref = self.ast.push_expr(expr);
-
         Stmt::Return(expr_ref)
     }
 
     /// Parse an expression statement.
     fn expr_stmt(&mut self) -> Stmt {
-        let expr = self.expression();
+        let expr_ref = self.expression();
         self.eat(&Token::SemiColon);
         // Push the expression to the AST.
-        let expr_ref = self.ast.push_expr(expr);
-
         Stmt::Expr(expr_ref)
+    }
+
+    /// Return a token's precedence.
+    fn tok_precedence(&self, token: &Token) -> Precedence {
+        match token {
+            &Token::Minus => Precedence::Term,
+            &Token::Plus => Precedence::Term,
+            &Token::Slash => Precedence::Factor,
+            &Token::Star => Precedence::Factor,
+            _ => Precedence::None,
+        }
     }
 
     /// Match the current token against the given token, if they match
@@ -87,7 +221,6 @@ impl Parser {
             println!("Consuming token: {token}");
             return Some(self.consume());
         }
-        println!("Token {token} doesn't match {}", self.peek());
         None
     }
 
@@ -140,9 +273,32 @@ mod tests {
                 println!("Tokens: {:?}", tokens);
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
-                println!("Got AST: {:?}", parser.ast());
+                println!("Got AST: {}", parser.ast());
             }
         };
     }
     test_parser!(can_parse_return_statements, "return 0;", &vec![]);
+    /*
+     * Imaginary AST for this expression
+     * Grouping(
+     *   Add(
+     *       Add(
+     *           Add(1,2),
+     *           3,
+     *       ),
+     *       Grouping(
+     *           Mul(
+     *               4,
+     *               5,
+     *           )
+     *       )
+     *   )
+     *)
+     *
+     * */
+    test_parser!(
+        can_parse_grouping_expression,
+        "return (1 + 2 + 3 + (4 * 5));",
+        &vec![]
+    );
 }
