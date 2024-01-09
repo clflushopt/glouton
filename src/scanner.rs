@@ -213,6 +213,7 @@ impl Scanner<'_> {
     fn keyword(&self, identifier: &str) -> Token {
         match identifier {
             "return" => Token::Return,
+            "int" => Token::Int,
             _ => todo!("Unsupported identifier or token {identifier}"),
         }
     }

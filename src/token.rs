@@ -1,18 +1,23 @@
 //! Implementation of language tokens.
-use std::fmt::{self};
+use std::fmt::{self, write};
 
 /// Language defined keywords.
-pub const KEYWORDS: &'static [&'static str] = &["return"];
+pub const KEYWORDS: &'static [&'static str] = &["int", "char", "bool", "return"];
 
 /// Token represents the individual language tokens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
+    // Single character tokens.
     LParen,
     RParen,
     LBrace,
     RBrace,
     LBracket,
     RBracket,
+    SemiColon,
+    Colon,
+    Comma,
+    // Operators.
     Equal,
     BangEqual,
     EqualEqual,
@@ -27,15 +32,19 @@ pub enum Token {
     And,
     Or,
     Bang,
+    // Literal values.
     IntLiteral(i32),
     CharLiteral(char),
     StringLiteral(String),
     BoolLiteral(bool),
+    // Identifiers.
     Identifier(String),
-    SemiColon,
-    Colon,
-    Comma,
+    // Keywords.
     Return,
+    // Type declarations.
+    Int,
+    Char,
+    Bool,
     // Eof token used to signal the end of file.
     Eof,
 }
@@ -50,6 +59,9 @@ impl fmt::Display for Token {
             &Self::RBrace => write!(f, "}}"),
             &Self::LBracket => write!(f, "["),
             &Self::RBracket => write!(f, "]"),
+            &Self::SemiColon => write!(f, ";"),
+            &Self::Colon => write!(f, ":"),
+            &Self::Comma => write!(f, ","),
             &Self::Equal => write!(f, "ASSIGN"),
             &Self::EqualEqual => write!(f, "EQUAL"),
             &Self::BangEqual => write!(f, "NEQ"),
@@ -64,15 +76,22 @@ impl fmt::Display for Token {
             &Self::And => write!(f, "AND"),
             &Self::Or => write!(f, "OR"),
             &Self::Bang => write!(f, "NOT"),
-            &Self::SemiColon => write!(f, ";"),
-            &Self::Colon => write!(f, ":"),
-            &Self::Comma => write!(f, ","),
+            // Literals are wrapped in `TYPE()` for readability.
             &Self::IntLiteral(value) => write!(f, "INT({value})"),
             &Self::CharLiteral(value) => write!(f, "CHAR({value})"),
             &Self::StringLiteral(value) => write!(f, "STR({value})"),
             &Self::BoolLiteral(value) => write!(f, "BOOL({value})"),
+            // Identifiers are wrapped in `IDENT()` to signify that they
+            // are identifiers.
             &Self::Identifier(str) => write!(f, "IDENT({str})"),
+            // Keywords are display in capital case.
             &Self::Return => write!(f, "RETURN"),
+            // Types supported are shown with a `_T` to signify that this is
+            // a type.
+            &Self::Int => write!(f, "INT_T"),
+            &Self::Bool => write!(f, "BOOL_T"),
+            &Self::Char => write!(f, "CHAR_T"),
+            // EOF is shown as `EOF` to signify end of token stream.
             &Self::Eof => write!(f, "EOF"),
         }
     }

@@ -164,20 +164,29 @@ pub struct AST {
     expressions: ExprPool,
 }
 
+/// AST visitor trait exposes the set of behaviors to be implemented by AST
+/// consumers (semantic analyzer, type checker, IR generator...).
+pub trait Visitor<T> {
+    /// Visit an expression.
+    fn visit_expr(&mut self, expr: &Expr) -> T;
+}
+
+/// Display implementation uses the `ASTDisplayer` to display the AST.
 impl fmt::Display for AST {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut displayer = ASTDisplayer::new(self);
         for stmt in &self.statements.nodes {
             let _ = match stmt {
                 Stmt::Return(expr_ref) => {
                     if let Some(expr) = self.get_expr(*expr_ref) {
-                        write!(f, "Return({})", display_expr_node(self, &expr))
+                        write!(f, "Return({})", displayer.visit_expr(&expr))
                     } else {
                         unreachable!("Return statement is missing expression ref")
                     }
                 }
                 Stmt::Expr(expr_ref) => {
                     if let Some(expr) = self.get_expr(*expr_ref) {
-                        write!(f, "Expr({})", display_expr_node(self, &expr))
+                        write!(f, "Expr({})", displayer.visit_expr(&expr))
                     } else {
                         unreachable!("Expr statement is missing expression ref")
                     }
@@ -185,62 +194,6 @@ impl fmt::Display for AST {
             };
         }
         Ok(())
-    }
-}
-
-fn display_expr_node(ast: &AST, node: &Expr) -> String {
-    match node {
-        &Expr::IntLiteral(value) => value.to_string(),
-        &Expr::UnaryOp { operator, operand } => {
-            if let Some(operand) = ast.get_expr(operand) {
-                match operator {
-                    UnaryOperator::Neg => format!("Neg({})", display_expr_node(ast, operand)),
-                    UnaryOperator::Not => format!("Not({})", display_expr_node(ast, operand)),
-                }
-            } else {
-                unreachable!("unary node is missing operand")
-            }
-        }
-        &Expr::BinOp {
-            left,
-            operator,
-            right,
-        } => {
-            if let (Some(left), Some(right)) = (ast.get_expr(left), ast.get_expr(right)) {
-                match operator {
-                    BinaryOperator::Add => format!(
-                        "Add({}, {})",
-                        display_expr_node(ast, left),
-                        display_expr_node(ast, right)
-                    ),
-                    BinaryOperator::Sub => format!(
-                        "Sub({}, {})",
-                        display_expr_node(ast, left),
-                        display_expr_node(ast, right)
-                    ),
-                    BinaryOperator::Mul => format!(
-                        "Mul({}, {})",
-                        display_expr_node(ast, left),
-                        display_expr_node(ast, right)
-                    ),
-                    BinaryOperator::Div => format!(
-                        "Div({}, {})",
-                        display_expr_node(ast, left),
-                        display_expr_node(ast, right)
-                    ),
-                }
-            } else {
-                unreachable!("binary node is missing operand")
-            }
-        }
-        &Expr::Grouping(expr_ref) => {
-            if let Some(expr) = ast.get_expr(expr_ref) {
-                format!("Grouping({})", display_expr_node(ast, expr))
-            } else {
-                unreachable!("unary node is missing operand")
-            }
-        }
-        _ => todo!("Unimplemented display for Node {:?}", node),
     }
 }
 
@@ -273,6 +226,69 @@ impl AST {
     /// if the statement node deosn't exist.
     pub fn get_stmt(&self, stmt_ref: StmtRef) -> Option<&Stmt> {
         self.statements.get(stmt_ref)
+    }
+}
+
+/// `ASTDisplayer` walks the AST nodes and displays the individual expressions.
+struct ASTDisplayer<'a> {
+    ast: &'a AST,
+}
+
+impl<'a> ASTDisplayer<'a> {
+    pub fn new(ast: &'a AST) -> Self {
+        Self { ast }
+    }
+}
+
+impl<'a> Visitor<String> for ASTDisplayer<'a> {
+    fn visit_expr(&mut self, expr: &Expr) -> String {
+        match expr {
+            &Expr::IntLiteral(value) => value.to_string(),
+            &Expr::UnaryOp { operator, operand } => {
+                if let Some(operand) = self.ast.get_expr(operand) {
+                    match operator {
+                        UnaryOperator::Neg => format!("Neg({})", self.visit_expr(operand)),
+                        UnaryOperator::Not => format!("Not({})", self.visit_expr(operand)),
+                    }
+                } else {
+                    unreachable!("unary node is missing operand")
+                }
+            }
+            &Expr::BinOp {
+                left,
+                operator,
+                right,
+            } => {
+                if let (Some(left), Some(right)) =
+                    (self.ast.get_expr(left), self.ast.get_expr(right))
+                {
+                    match operator {
+                        BinaryOperator::Add => {
+                            format!("Add({}, {})", self.visit_expr(left), self.visit_expr(right))
+                        }
+                        BinaryOperator::Sub => {
+                            format!("Sub({}, {})", self.visit_expr(left), self.visit_expr(right))
+                        }
+                        BinaryOperator::Mul => {
+                            format!("Mul({}, {})", self.visit_expr(left), self.visit_expr(right))
+                        }
+                        BinaryOperator::Div => {
+                            format!("Div({}, {})", self.visit_expr(left), self.visit_expr(right))
+                        }
+                    }
+                } else {
+                    unreachable!("binary node is missing operand")
+                }
+            }
+            &Expr::Grouping(expr_ref) => {
+                if let Some(expr) = self.ast.get_expr(expr_ref) {
+                    format!("Grouping({})", self.visit_expr(expr))
+                } else {
+                    unreachable!("unary node is missing operand")
+                }
+            }
+            _ => todo!("Unimplemented display for Node {:?}", expr),
+        }
     }
 }
 
