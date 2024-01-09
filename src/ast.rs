@@ -166,8 +166,8 @@ pub struct AST {
 
 impl fmt::Display for AST {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, stmt) in self.statements.nodes.iter().enumerate() {
-            let res = match stmt {
+        for stmt in &self.statements.nodes {
+            let _ = match stmt {
                 Stmt::Return(expr_ref) => {
                     if let Some(expr) = self.get_expr(*expr_ref) {
                         write!(f, "Return({})", display_expr_node(self, &expr))
@@ -184,7 +184,7 @@ impl fmt::Display for AST {
                 }
             };
         }
-        write!(f, "DONE")
+        Ok(())
     }
 }
 
@@ -209,22 +209,22 @@ fn display_expr_node(ast: &AST, node: &Expr) -> String {
             if let (Some(left), Some(right)) = (ast.get_expr(left), ast.get_expr(right)) {
                 match operator {
                     BinaryOperator::Add => format!(
-                        "Add({}, {}",
+                        "Add({}, {})",
                         display_expr_node(ast, left),
                         display_expr_node(ast, right)
                     ),
                     BinaryOperator::Sub => format!(
-                        "Sub({}, {}",
+                        "Sub({}, {})",
                         display_expr_node(ast, left),
                         display_expr_node(ast, right)
                     ),
                     BinaryOperator::Mul => format!(
-                        "Mul({}, {}",
+                        "Mul({}, {})",
                         display_expr_node(ast, left),
                         display_expr_node(ast, right)
                     ),
                     BinaryOperator::Div => format!(
-                        "Div({}, {}",
+                        "Div({}, {})",
                         display_expr_node(ast, left),
                         display_expr_node(ast, right)
                     ),

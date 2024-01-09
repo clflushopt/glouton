@@ -103,16 +103,7 @@ impl Parser {
 
     /// Parse an expression.
     fn expression(&mut self) -> ExprRef {
-        println!("Current AST expression: {:?}", self.ast);
         self.precedence(Precedence::Assignment)
-        /*
-        match self.consume() {
-            Token::IntLiteral(value) => {
-                return Expr::IntLiteral(*value);
-            }
-            _ => todo!("Unsupprted expression"),
-        }
-        */
     }
 
     /// Parse an expression by its precedence level.
@@ -218,7 +209,6 @@ impl Parser {
     /// consume the token and return it. Otherwise returns `None`.
     fn eat(&mut self, token: &Token) -> Option<&Token> {
         if self.check(token) {
-            println!("Consuming token: {token}");
             return Some(self.consume());
         }
         None
@@ -270,14 +260,13 @@ mod tests {
                 let source = $source;
                 let mut scanner = Scanner::new(source);
                 let tokens = scanner.scan().unwrap();
-                println!("Tokens: {:?}", tokens);
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
-                println!("Got AST: {}", parser.ast());
+                assert_eq!(parser.ast().to_string(), $expected);
             }
         };
     }
-    test_parser!(can_parse_return_statements, "return 0;", &vec![]);
+    test_parser!(can_parse_return_statements, "return 0;", "Return(0)");
     /*
      * Imaginary AST for this expression
      * Grouping(
@@ -298,7 +287,25 @@ mod tests {
      * */
     test_parser!(
         can_parse_grouping_expression,
-        "return (1 + 2 + 3 + (4 * 5));",
-        &vec![]
+        "(1 + 2 + 3 + (4 * 5));",
+        "Expr(Grouping(Add(Add(Add(1, 2), 3), Grouping(Mul(4, 5)))))"
+    );
+    /*
+     * Imaginary AST for this expression
+     * Add(
+     *   Sub(
+     *       Mul(
+     *           Div(6,3),
+     *           4
+     *       ),
+     *       1
+     *   ),
+     *   2
+     *)
+     */
+    test_parser!(
+        can_parse_non_grouped_expression,
+        "6 / 3 * 4 - 1 + 2",
+        "Expr(Add(Sub(Mul(Div(6, 3), 4), 1), 2))"
     );
 }
