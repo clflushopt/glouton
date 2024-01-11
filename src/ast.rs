@@ -116,11 +116,31 @@ pub enum BinaryOperator {
     Div,
 }
 
+impl fmt::Display for BinaryOperator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BinaryOperator::Add => write!(f, "ADD"),
+            BinaryOperator::Sub => write!(f, "SUB"),
+            BinaryOperator::Mul => write!(f, "MUL"),
+            BinaryOperator::Div => write!(f, "DIV"),
+        }
+    }
+}
+
 /// Unary operators
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOperator {
     Neg,
     Not,
+}
+
+impl fmt::Display for UnaryOperator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UnaryOperator::Neg => write!(f, "NEG"),
+            UnaryOperator::Not => write!(f, "NOT"),
+        }
+    }
 }
 
 /// Expression nodes are used to represent expressions.

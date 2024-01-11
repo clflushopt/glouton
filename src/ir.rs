@@ -1,32 +1,11 @@
 //! Global intermediate representation definition and implementation.
 //!
-//! Glouton Intermediate Representation is a small SSA based intermediate
-//! representation. The intermediate representation describes three core
+//! Glouton Intermediate Representation is a linear SSA based intermediate
+//! representation. The intermediate representation has three core
 //! instruction types, constant operations which produce constant values
 //! value operations which take operands and produce values and effect based
 //! operations which take operands and produce no values.
-//!
-//! When generating a control flow graph or a sea of nodes representation from
-//! the AST, basic blocks and nodes are composed of GIR instructions.
-//!
-//! In a way GIR is a hybrid intermediate representation that uses a linear IR
-//! for the individual operations and a graph IR for the program representation
-//! in our case we use both a CFG and a Sea of Nodes approach for the program
-//! representation.
-
-/// We follow the same approach in the AST when building the intermediate
-/// representation. The control flow graph is flattened and doesn't use
-/// pointers.
-///
-/// The first handle or reference we expose is a `BlockRef` which is used
-/// to reference basic blocks (the nodes in the graph).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BlockRef(u32);
-/// We also expose a handle to edges in the graph, since our edges are enums
-/// that hold data (instruction, labels...) they need to have their own storage
-/// in the graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EdgeRef(u32);
+use crate::ast;
 
 /// Instruction are the atomic operations of the linear IR part in GIR
 /// they compose the building blocks of basic blocks.
@@ -56,57 +35,74 @@ pub struct EdgeRef(u32);
 /// variables.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {
-    // The constant instruction produces a single constant integer value.
-    Const,
+    // The constant instruction produces a single constant integer value
+    // to a destination variable, in case of literal values the destination
+    // is either the variable defined in the AST in the case of assignment
+    // expressions or a one created by the generator.
+    Const { value: i32, dst: u32 },
 }
 
-/// `BasicBlock` is the atomic unit of graph IR and represent a node in
-/// the control flow graph. Each basic block represent a single block of
-/// instructions assumed to execute sequentially, branches, indirect jumps
-/// are edges between basic blocks.
-///
-/// Each basic block has a set of input edges and a set of output edges
-/// each edge can describe either an unconditional jump with a target label
-/// a conditional jump with two target labels, a functional call or a function
-/// return.
-///
-/// Edges hold a single instruction that describes which control flow operation
-/// is executed on that particular edge.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BasicBlock {
-    // Instructions that constitute the basic block.
-    insts: Vec<Instruction>,
-    // Set of possible entry edges.
-    entry_points: Vec<EdgeRef>,
-    // Set of possible exit edges.
-    exit_points: Vec<EdgeRef>,
+/// `IRGenerator` generates an intermediate representation by walking the AST
+/// and building an `AbstractProgram` which is an abstract representation of
+/// the entire program.
+pub struct IRGenerator<'a> {
+    abstract_program: Vec<Instruction>,
+    ast: &'a ast::AST,
 }
 
-/// Edges in the control flow graph connect basic blocks and hold control
-/// flow instructions and a target label.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Edge {
-    Cond {
-        target_if_true: BlockRef,
-        target_if_false: BlockRef,
-        cond: Instruction,
-    },
-    Jump {
-        target: BlockRef,
-    },
-    Ret {
-        target: BlockRef,
-    },
+impl<'a> IRGenerator<'a> {
+    pub fn new(ast: &'a ast::AST) -> Self {
+        Self {
+            abstract_program: Vec::new(),
+            ast,
+        }
+    }
 }
 
-/// IRGenerator implements the visitor pattern for the AST.
-///
-/// When generating IR from an AST there are two always present, specially
-/// designated blocks: the entry block, used to indicate a program's entry
-/// point and the exit block, used to designate the exit point of a program.
-pub struct IRGenerator {
-    // Nodes in the control flow graph constructed from the AST.
-    blocks: Vec<BasicBlock>, // Edges in the control flow graph
-    // Edges in the control flow graph.
-    edges: Vec<Edge>,
+impl<'a> ast::Visitor<()> for IRGenerator<'a> {
+    fn visit_expr(&mut self, expr: &ast::Expr) -> () {
+        match expr {
+            &ast::Expr::IntLiteral(value) => self
+                .abstract_program
+                .push(Instruction::Const { value, dst: 0 }),
+            &ast::Expr::UnaryOp { operator, operand } => {
+                if let Some(operand) = self.ast.get_expr(operand) {
+                    match operator {
+                        ast::UnaryOperator::Neg => (),
+                        ast::UnaryOperator::Not => (),
+                    }
+                } else {
+                    unreachable!("unary node is missing operand")
+                }
+            }
+            &ast::Expr::BinOp {
+                left,
+                operator,
+                right,
+            } => {
+                if let (Some(left), Some(right)) =
+                    (self.ast.get_expr(left), self.ast.get_expr(right))
+                {
+                    match operator {
+                        ast::BinaryOperator::Add => {
+                            self.visit_expr(left);
+                            self.visit_expr(right);
+                            ()
+                        }
+                        _ => todo!("Unimplemented IR generation for operator {operator}"),
+                    }
+                } else {
+                    unreachable!("binary node is missing operand")
+                }
+            }
+            &ast::Expr::Grouping(expr_ref) => {
+                if let Some(expr) = self.ast.get_expr(expr_ref) {
+                    self.visit_expr(expr)
+                } else {
+                    unreachable!("unary node is missing operand")
+                }
+            }
+            _ => todo!("Unimplemented display for Node {:?}", expr),
+        }
+    }
 }
