@@ -16,13 +16,19 @@ pub enum Precedence {
     // Logical OR (||) has lower precedence than Logical (AND).
     Or = 2,
     And = 3,
+    // Equality and Inequality.
     Equal = 4,
+    // Comparison operations.
     Comparison = 5,
+    // Plus, minus.
     Term = 6,
+    // Multiply, divide, modulo.
     Factor = 7,
+    // Logical not, unary minutes, pointer dereference
+    // increment, decrement.
     Unary = 8,
+    // Function calls, array subscript, structure field reference.
     Call = 9,
-    Primary = 10,
 }
 
 impl From<u8> for Precedence {
@@ -38,7 +44,6 @@ impl From<u8> for Precedence {
             7 => Self::Factor,
             8 => Self::Unary,
             9 => Self::Call,
-            10 => Self::Primary,
             _ => unreachable!("Unexpected `from({prec})` no matching variant for {prec}"),
         }
     }

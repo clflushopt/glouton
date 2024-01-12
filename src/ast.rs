@@ -226,6 +226,12 @@ impl AST {
         }
     }
 
+    /// Return a non-mutable reference to the statement pool.
+    /// TODO: implement iterator on `StmtPool` and `ExprPool`.
+    pub fn statements(&self) -> &Vec<Stmt> {
+        &self.statements.nodes
+    }
+
     /// Push a new statement node to the AST returning a reference to it.
     pub fn push_stmt(&mut self, stmt: Stmt) -> StmtRef {
         self.statements.add(stmt)
