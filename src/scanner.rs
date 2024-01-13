@@ -1,5 +1,3 @@
-//! Lexical analysis module responsible for building tokens out of source
-//! code.
 use crate::token::{Token, KEYWORDS};
 use std::error::Error;
 use std::fmt;
@@ -214,7 +212,18 @@ impl Scanner<'_> {
         match identifier {
             "return" => Token::Return,
             "int" => Token::Int,
-            _ => todo!("Unsupported identifier or token {identifier}"),
+            "char" => Token::Char,
+            "bool" => Token::Bool,
+            "const" => Token::Const,
+            "void" => Token::Void,
+            "if" => Token::If,
+            "else" => Token::Else,
+            "while" => Token::While,
+            "for" => Token::For,
+            "break" => Token::Break,
+            "true" => Token::True,
+            "false" => Token::False,
+            _ => todo!("Unsupported identifier or token: {identifier}"),
         }
     }
 
@@ -263,6 +272,84 @@ mod tests {
             Token::IntLiteral(24),
             Token::SemiColon,
             Token::Eof
+        ]
+    );
+
+    test_scanner!(
+        can_scan_function_declaration_with_loop,
+        r#"
+            int main() {
+                int a;
+                int b;
+                a = 1;
+                b = 2;
+                int i = 0;
+                int sum = 0;
+                for (i = 0;i < 10;i++) {
+                    sum = sum + a * b;
+                }
+                return sum;
+            }
+        "#,
+        &vec![
+            Token::Int,
+            Token::Identifier("main".to_string()),
+            Token::LParen,
+            Token::RParen,
+            Token::LBrace,
+            Token::Int,
+            Token::Identifier("a".to_string()),
+            Token::SemiColon,
+            Token::Int,
+            Token::Identifier("b".to_string()),
+            Token::SemiColon,
+            Token::Identifier("a".to_string()),
+            Token::Equal,
+            Token::IntLiteral(1),
+            Token::SemiColon,
+            Token::Identifier("b".to_string()),
+            Token::Equal,
+            Token::IntLiteral(2),
+            Token::SemiColon,
+            Token::Int,
+            Token::Identifier("i".to_string()),
+            Token::Equal,
+            Token::IntLiteral(0),
+            Token::SemiColon,
+            Token::Int,
+            Token::Identifier("sum".to_string()),
+            Token::Equal,
+            Token::IntLiteral(0),
+            Token::SemiColon,
+            Token::For,
+            Token::LParen,
+            Token::Identifier("i".to_string()),
+            Token::Equal,
+            Token::IntLiteral(0),
+            Token::SemiColon,
+            Token::Identifier("i".to_string()),
+            Token::Lesser,
+            Token::IntLiteral(10),
+            Token::SemiColon,
+            Token::Identifier("i".to_string()),
+            Token::Plus,
+            Token::Plus,
+            Token::RParen,
+            Token::LBrace,
+            Token::Identifier("sum".to_string()),
+            Token::Equal,
+            Token::Identifier("sum".to_string()),
+            Token::Plus,
+            Token::Identifier("a".to_string()),
+            Token::Star,
+            Token::Identifier("b".to_string()),
+            Token::SemiColon,
+            Token::RBrace,
+            Token::Return,
+            Token::Identifier("sum".to_string()),
+            Token::SemiColon,
+            Token::RBrace,
+            Token::Eof,
         ]
     );
 }

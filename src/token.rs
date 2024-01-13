@@ -1,8 +1,11 @@
 //! Implementation of language tokens.
-use std::fmt::{self, write};
+use std::fmt::{self};
 
 /// Language defined keywords.
-pub const KEYWORDS: &'static [&'static str] = &["int", "char", "bool", "return"];
+pub const KEYWORDS: &'static [&'static str] = &[
+    "int", "char", "bool", "return", "const", "void", "if", "else", "while", "for", "break",
+    "true", "false",
+];
 
 /// Token represents the individual language tokens.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +43,15 @@ pub enum Token {
     // Identifiers.
     Identifier(String),
     // Keywords.
+    Const,
+    Void,
+    If,
+    Else,
+    While,
+    For,
+    Break,
+    True,
+    False,
     Return,
     // Type declarations.
     Int,
@@ -86,6 +98,15 @@ impl fmt::Display for Token {
             &Self::Identifier(str) => write!(f, "IDENT({str})"),
             // Keywords are display in capital case.
             &Self::Return => write!(f, "RETURN"),
+            &Self::Const => write!(f, "CONST"),
+            &Self::Void => write!(f, "VOID"),
+            &Self::If => write!(f, "IF"),
+            &Self::Else => write!(f, "ELSE"),
+            &Self::While => write!(f, "WHILE"),
+            &Self::For => write!(f, "FOR"),
+            &Self::Break => write!(f, "BREAK"),
+            &Self::True => write!(f, "TRUE"),
+            &Self::False => write!(f, "FALSE"),
             // Types supported are shown with a `_T` to signify that this is
             // a type.
             &Self::Int => write!(f, "INT_T"),

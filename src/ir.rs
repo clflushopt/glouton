@@ -42,10 +42,14 @@ pub enum Instruction {
     // is either the variable defined in the AST in the case of assignment
     // expressions or a one created by the generator.
     Const { value: i32, dst: u32 },
+    // Arithmetic instructions are value operations.
     Add { lhs: u32, rhs: u32, dst: u32 },
     Sub { lhs: u32, rhs: u32, dst: u32 },
     Mul { lhs: u32, rhs: u32, dst: u32 },
     Div { lhs: u32, rhs: u32, dst: u32 },
+    // Return instruction is an effect operation that transfers execution
+    // back to the caller.
+    Ret,
 }
 
 impl fmt::Display for Instruction {
