@@ -143,6 +143,24 @@ impl fmt::Display for UnaryOperator {
     }
 }
 
+/// Declaration types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclType {
+    Int,
+    Char,
+    Bool,
+}
+
+impl fmt::Display for DeclType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DeclType::Int => write!(f, "INT_TYPE"),
+            DeclType::Char => write!(f, "CHAR_TYPE"),
+            DeclType::Bool => write!(f, "BOOL_TYPE"),
+        }
+    }
+}
+
 /// Expression nodes are used to represent expressions.
 /// TODO make Expr homogenous by storing `LiteralRef`, `StringRef` and so on
 /// in a separate storage array stored in the AST.
@@ -152,6 +170,10 @@ pub enum Expr {
     Named(String),
     // Integer literal values.
     IntLiteral(i32),
+    // Boolean literal values.
+    BoolLiteral(bool),
+    // Char literal values.
+    CharLiteral(char),
     // Grouping expressions (parenthesised expressions).
     Grouping(ExprRef),
     // Binary operations (arithmetic, boolean, bitwise).
@@ -172,6 +194,12 @@ pub enum Expr {
 pub enum Stmt {
     // Return statements.
     Return(ExprRef),
+    // Variable declarations.
+    VarDecl {
+        decl_type: DeclType,
+        name: String,
+        value: ExprRef,
+    },
     // Expression statements.
     Expr(ExprRef),
 }
@@ -204,6 +232,18 @@ impl fmt::Display for AST {
                         unreachable!("Return statement is missing expression ref")
                     }
                 }
+                Stmt::VarDecl {
+                    decl_type,
+                    name,
+                    value,
+                } => {
+                    write!(f, "VAR({}, {}", decl_type, name)?;
+                    if let Some(expr) = self.get_expr(*value) {
+                        write!(f, ", {})", displayer.visit_expr(&expr))
+                    } else {
+                        unreachable!("Missing expression in assignment")
+                    }
+                }
                 Stmt::Expr(expr_ref) => {
                     if let Some(expr) = self.get_expr(*expr_ref) {
                         write!(f, "Expr({})", displayer.visit_expr(&expr))
@@ -227,9 +267,13 @@ impl AST {
     }
 
     /// Return a non-mutable reference to the statement pool.
-    /// TODO: implement iterator on `StmtPool` and `ExprPool`.
     pub fn statements(&self) -> &Vec<Stmt> {
         &self.statements.nodes
+    }
+
+    /// Return a non-mutable reference to the expression pool.
+    pub fn expressions(&self) -> &Vec<Expr> {
+        &self.expressions.nodes
     }
 
     /// Push a new statement node to the AST returning a reference to it.

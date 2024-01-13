@@ -1,7 +1,6 @@
 //! The nice thing about this implementation is that it builds a purely flat
 //! AST that uses arenas and handles to represent the tree.
-
-use crate::ast::{BinaryOperator, Expr, ExprRef, Stmt, StmtRef, UnaryOperator, AST};
+use crate::ast::{BinaryOperator, DeclType, Expr, ExprRef, Stmt, UnaryOperator, AST};
 use crate::token::Token;
 
 /// Operator precedence tablet.
@@ -98,12 +97,56 @@ impl Parser {
 
     /// Parse a statement.
     fn statement(&mut self) -> Stmt {
-        if self.eat(&Token::Return).is_some() {
-            let stmt = self.return_stmt();
-            return stmt;
+        match self.peek() {
+            &Token::Return => self.return_stmt(),
+            &Token::Int | &Token::Bool | &Token::Char => self.declaration(),
+            _ => self.expr_stmt(),
         }
+    }
 
-        self.expr_stmt()
+    /// Parse a declaration.
+    fn declaration(&mut self) -> Stmt {
+        let decl_type = match self.consume() {
+            &Token::Int => DeclType::Int,
+            &Token::Char => DeclType::Char,
+            &Token::Bool => DeclType::Bool,
+            _ => unreachable!("Expected declaration type to be one of (int, char, bool)."),
+        };
+        println!("Declaration type : {}", decl_type);
+        let identifier = match self.consume() {
+            Token::Identifier(ident) => ident.clone(),
+            _ => unreachable!("Expected identifier, found {}", self.peek()),
+        };
+        println!("Identifier : {}", identifier);
+        let assigned = self.expression();
+        /*
+        let assigned = match self.exp() {
+            Token::SemiColon => {
+                // TODO: push a default value
+                match decl_type {
+                    DeclType::Bool => self.ast.push_expr(Expr::BoolLiteral(false)),
+                    DeclType::Int => self.ast.push_expr(Expr::IntLiteral(0)),
+                    DeclType::Char => self.ast.push_expr(Expr::CharLiteral('\0')),
+                }
+            }
+            _ => self.expression(),
+        };
+        */
+        self.eat(&Token::SemiColon);
+
+        Stmt::VarDecl {
+            decl_type,
+            name: identifier,
+            value: assigned,
+        }
+    }
+
+    /// Parse a return statement.
+    fn return_stmt(&mut self) -> Stmt {
+        self.eat(&Token::Return);
+        let expr_ref = self.expression();
+        self.eat(&Token::SemiColon);
+        Stmt::Return(expr_ref)
     }
 
     /// Parse an expression.
@@ -122,10 +165,11 @@ impl Parser {
                 let literal_expr = Expr::IntLiteral(value);
                 self.ast.push_expr(literal_expr)
             }
+            &Token::Equal => self.assignment(),
             _ => todo!("Unexpected prefix token {}", self.prev()),
         };
 
-        while prec <= self.tok_precedence(self.peek()) {
+        while prec < self.tok_precedence(self.peek()) {
             let infix_ref = match self.consume() {
                 &Token::Plus => self.binary(prefix_ref),
                 &Token::Minus => self.binary(prefix_ref),
@@ -184,11 +228,12 @@ impl Parser {
         self.ast.push_expr(Expr::UnaryOp { operator, operand })
     }
 
-    /// Parse a return statement.
-    fn return_stmt(&mut self) -> Stmt {
-        let expr_ref = self.expression();
+    /// Parse an assignment expression.
+    fn assignment(&mut self) -> ExprRef {
+        // Parse the right hand side expression.
+        let expr_ref = self.precedence(Precedence::None);
         self.eat(&Token::SemiColon);
-        Stmt::Return(expr_ref)
+        expr_ref
     }
 
     /// Parse an expression statement.
@@ -206,6 +251,7 @@ impl Parser {
             &Token::Plus => Precedence::Term,
             &Token::Slash => Precedence::Factor,
             &Token::Star => Precedence::Factor,
+            &Token::Equal => Precedence::Assignment,
             _ => Precedence::None,
         }
     }
@@ -312,5 +358,11 @@ mod tests {
         can_parse_non_grouped_expression,
         "6 / 3 * 4 - 1 + 2",
         "Expr(Add(Sub(Mul(Div(6, 3), 4), 1), 2))"
+    );
+
+    test_parser!(
+        can_parse_variable_declaration,
+        "int a = 0;",
+        "VAR(INT_TYPE, a, 0)"
     );
 }

@@ -94,6 +94,17 @@ impl<'a> IRGenerator<'a> {
                         unreachable!("Return statement is missing expression ref")
                     }
                 }
+                ast::Stmt::VarDecl {
+                    decl_type,
+                    name,
+                    value,
+                } => {
+                    if let Some(expr) = self.ast.get_expr(*value) {
+                        let _ = self.visit_expr(expr);
+                    } else {
+                        unreachable!("Variable declaration is missing assignmenet")
+                    }
+                }
                 ast::Stmt::Expr(expr_ref) => {
                     if let Some(expr) = self.ast.get_expr(*expr_ref) {
                         let _ = self.visit_expr(expr);
