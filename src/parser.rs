@@ -90,7 +90,7 @@ impl Parser {
         //             | varDecl
         //             | statement;
         while !self.eof() {
-            let statement = self.statement();
+            let statement = self.declaration();
             self.ast.push_stmt(statement);
         }
     }
@@ -99,25 +99,27 @@ impl Parser {
     fn statement(&mut self) -> Stmt {
         match self.peek() {
             &Token::Return => self.return_stmt(),
-            &Token::Int | &Token::Bool | &Token::Char => self.declaration(),
             _ => self.expr_stmt(),
         }
     }
 
     /// Parse a declaration.
     fn declaration(&mut self) -> Stmt {
+        if self.peek() != &Token::Int && self.peek() != &Token::Char && self.peek() != &Token::Bool
+        {
+            return self.statement();
+        }
+
         let decl_type = match self.consume() {
             &Token::Int => DeclType::Int,
             &Token::Char => DeclType::Char,
             &Token::Bool => DeclType::Bool,
             _ => unreachable!("Expected declaration type to be one of (int, char, bool)."),
         };
-        println!("Declaration type : {}", decl_type);
         let identifier = match self.consume() {
             Token::Identifier(ident) => ident.clone(),
             _ => unreachable!("Expected identifier, found {}", self.peek()),
         };
-        println!("Identifier : {}", identifier);
         // Variable declaration.
         if self.peek() == &Token::SemiColon {
             self.eat(&Token::SemiColon);
@@ -159,7 +161,7 @@ impl Parser {
         };
         */
         self.eat(&Token::SemiColon);
-        Stmt::Empty
+        self.statement()
     }
 
     /// Parse a return statement.
