@@ -112,6 +112,7 @@ impl<'a> IRGenerator<'a> {
                         unreachable!("Expr statement is missing expression ref")
                     }
                 }
+                _ => todo!("unimplemented ir gen phase for stmt {:?}", stmt),
             };
         }
         println!("IR dump {:?}", self.abstract_program);
@@ -194,7 +195,6 @@ mod tests {
                 let tokens = scanner.scan().unwrap();
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
-                println!("AST: {}", parser.ast());
                 let mut irgen = IRGenerator::new(parser.ast());
                 irgen.gen();
                 let program = irgen.program();

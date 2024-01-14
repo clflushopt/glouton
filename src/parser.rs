@@ -118,7 +118,33 @@ impl Parser {
             _ => unreachable!("Expected identifier, found {}", self.peek()),
         };
         println!("Identifier : {}", identifier);
-        let assigned = self.expression();
+        // Variable declaration.
+        if self.peek() == &Token::SemiColon {
+            self.eat(&Token::SemiColon);
+            let assigned = decl_type.default_value();
+            let assigned_ref = self.ast.push_expr(assigned);
+            // Declaration without an assignment.
+            return Stmt::VarDecl {
+                decl_type,
+                name: identifier,
+                value: assigned_ref,
+            };
+        } else if self.peek() == &Token::Equal {
+            let assigned = self.expression();
+            self.eat(&Token::SemiColon);
+            return Stmt::VarDecl {
+                decl_type,
+                name: identifier,
+                value: assigned,
+            };
+        }
+        // Function declaration.
+        self.eat(&Token::LParen);
+        // Arguments
+        self.eat(&Token::RParen);
+        // Body
+        self.eat(&Token::LBrace);
+        // self.block()
         /*
         let assigned = match self.exp() {
             Token::SemiColon => {
@@ -133,12 +159,7 @@ impl Parser {
         };
         */
         self.eat(&Token::SemiColon);
-
-        Stmt::VarDecl {
-            decl_type,
-            name: identifier,
-            value: assigned,
-        }
+        Stmt::Empty
     }
 
     /// Parse a return statement.
@@ -364,5 +385,17 @@ mod tests {
         can_parse_variable_declaration,
         "int a = 0;",
         "VAR(INT_TYPE, a, 0)"
+    );
+
+    test_parser!(
+        can_parse_non_assigned_declaration,
+        "int x;",
+        "VAR(INT_TYPE, x, 0)"
+    );
+
+    test_parser!(
+        can_parse_variable_declaration_with_expression,
+        "int b = (5 * 3 / 1 + 4 - 2);",
+        "VAR(INT_TYPE, b, Grouping(Sub(Add(Div(Mul(5, 3), 1), 4), 2)))"
     );
 }
