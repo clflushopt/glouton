@@ -227,6 +227,12 @@ pub enum Stmt {
     },
     // Expression statements.
     Expr(ExprRef),
+    // Blocks are sequence of statements.
+    Block(Vec<StmtRef>),
+    // If statements.
+    If(ExprRef, StmtRef, Option<StmtRef>),
+    // Loops are represented as While loops and For loops are de-sugarized into `While` loops.
+    While(ExprRef, StmtRef),
     // Empty statement.
     Empty,
 }
@@ -244,6 +250,8 @@ pub struct AST {
 pub trait Visitor<T> {
     /// Visit an expression.
     fn visit_expr(&mut self, expr: &Expr) -> T;
+    /// Visit a statement.
+    fn visit_stmt(&mut self, stmt: &Stmt) -> T;
 }
 
 /// Display implementation uses the `ASTDisplayer` to display the AST.
@@ -251,48 +259,7 @@ impl fmt::Display for AST {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut displayer = ASTDisplayer::new(self);
         for stmt in &self.statements.nodes {
-            let _ = match stmt {
-                Stmt::Return(expr_ref) => {
-                    if let Some(expr) = self.get_expr(*expr_ref) {
-                        write!(f, "Return({})", displayer.visit_expr(&expr))
-                    } else {
-                        unreachable!("Return statement is missing expression ref")
-                    }
-                }
-                Stmt::VarDecl {
-                    decl_type,
-                    name,
-                    value,
-                } => {
-                    write!(f, "VAR({}, {}", decl_type, name)?;
-                    if let Some(expr) = self.get_expr(*value) {
-                        write!(f, ", {})", displayer.visit_expr(&expr))
-                    } else {
-                        unreachable!("Missing expression in assignment")
-                    }
-                }
-                Stmt::Expr(expr_ref) => {
-                    if let Some(expr) = self.get_expr(*expr_ref) {
-                        write!(f, "Expr({})", displayer.visit_expr(&expr))
-                    } else {
-                        unreachable!("Expr statement is missing expression ref")
-                    }
-                }
-                Stmt::FuncArg { decl_type, name } => {
-                    write!(f, "ARG({}, {})", decl_type, name)
-                }
-                Stmt::FuncDecl {
-                    name,
-                    return_type,
-                    args,
-                    body,
-                } => {
-                    todo!("Unimplemented display trait for function declaration")
-                }
-                Stmt::Empty => unreachable!(
-                    "empty statement is a temporary placeholder and should not be in the ast"
-                ),
-            };
+            write!(f, "{}", displayer.visit_stmt(&stmt))?;
         }
         Ok(())
     }
@@ -352,6 +319,7 @@ impl<'a> ASTDisplayer<'a> {
 }
 
 impl<'a> Visitor<String> for ASTDisplayer<'a> {
+    /// Visit an expression and return its textual representation.
     fn visit_expr(&mut self, expr: &Expr) -> String {
         match expr {
             &Expr::IntLiteral(value) => value.to_string(),
@@ -399,6 +367,64 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 }
             }
             _ => todo!("Unimplemented display for Node {:?}", expr),
+        }
+    }
+    /// Visit a statement and return its textual representation.
+    fn visit_stmt(&mut self, stmt: &Stmt) -> String {
+        match stmt {
+            Stmt::Return(expr_ref) => {
+                if let Some(expr) = self.ast.get_expr(*expr_ref) {
+                    format!("Return({})", self.visit_expr(&expr))
+                } else {
+                    unreachable!("Return statement is missing expression ref")
+                }
+            }
+            Stmt::VarDecl {
+                decl_type,
+                name,
+                value,
+            } => {
+                let mut s = format!("VAR({}, {}", decl_type, name);
+                if let Some(expr) = self.ast.get_expr(*value) {
+                    s += &format!(", {})", self.visit_expr(&expr)).to_string();
+                } else {
+                    unreachable!("Missing expression in assignment")
+                }
+                s
+            }
+            Stmt::Expr(expr_ref) => {
+                if let Some(expr) = self.ast.get_expr(*expr_ref) {
+                    format!("Expr({})", self.visit_expr(&expr))
+                } else {
+                    unreachable!("Expr statement is missing expression ref")
+                }
+            }
+            Stmt::Block(stmts) => {
+                let mut s = "".to_string();
+                for stmt in stmts {
+                    if let Some(stmt) = self.ast.get_stmt(*stmt) {
+                        s += &format!("Stmt({})", self.visit_stmt(&stmt)).to_string();
+                    } else {
+                        unreachable!("Missing statement for ref {:?}", stmt);
+                    }
+                }
+                s
+            }
+            Stmt::FuncArg { decl_type, name } => {
+                format!("ARG({}, {})", decl_type, name)
+            }
+            Stmt::FuncDecl {
+                name,
+                return_type,
+                args,
+                body,
+            } => {
+                todo!("Unimplemented display trait for function declaration")
+            }
+            Stmt::Empty => unreachable!(
+                "empty statement is a temporary placeholder and should not be in the ast"
+            ),
+            _ => todo!("Unimplemented display trait for function declaration"),
         }
     }
 }

@@ -120,6 +120,9 @@ impl<'a> IRGenerator<'a> {
 }
 
 impl<'a> ast::Visitor<u32> for IRGenerator<'a> {
+    fn visit_stmt(&mut self, stmt: &ast::Stmt) -> u32 {
+        0
+    }
     fn visit_expr(&mut self, expr: &ast::Expr) -> u32 {
         match expr {
             &ast::Expr::IntLiteral(value) => {
