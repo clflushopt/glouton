@@ -90,8 +90,8 @@ impl Parser {
         //             | varDecl
         //             | statement;
         while !self.eof() {
-            let statement = self.declaration();
-            self.ast.push_stmt(statement);
+            let decl = self.declaration();
+            self.ast.push_stmt(decl);
         }
     }
 
@@ -120,48 +120,53 @@ impl Parser {
             Token::Identifier(ident) => ident.clone(),
             _ => unreachable!("Expected identifier, found {}", self.peek()),
         };
-        // Variable declaration.
-        if self.peek() == &Token::SemiColon {
-            self.eat(&Token::SemiColon);
-            let assigned = decl_type.default_value();
-            let assigned_ref = self.ast.push_expr(assigned);
-            // Declaration without an assignment.
-            return Stmt::VarDecl {
-                decl_type,
-                name: identifier,
-                value: assigned_ref,
-            };
-        } else if self.peek() == &Token::Equal {
-            let assigned = self.expression();
-            self.eat(&Token::SemiColon);
-            return Stmt::VarDecl {
-                decl_type,
-                name: identifier,
-                value: assigned,
-            };
-        }
-        // Function declaration.
-        self.eat(&Token::LParen);
-        // Arguments
-        self.eat(&Token::RParen);
-        // Body
-        self.eat(&Token::LBrace);
-        // self.block()
-        /*
-        let assigned = match self.exp() {
-            Token::SemiColon => {
-                // TODO: push a default value
-                match decl_type {
-                    DeclType::Bool => self.ast.push_expr(Expr::BoolLiteral(false)),
-                    DeclType::Int => self.ast.push_expr(Expr::IntLiteral(0)),
-                    DeclType::Char => self.ast.push_expr(Expr::CharLiteral('\0')),
-                }
+
+        match self.peek() {
+            // Variable declaration without right value assignment.
+            &Token::SemiColon => {
+                self.eat(&Token::SemiColon);
+                let assigned = decl_type.default_value();
+                let assigned_ref = self.ast.push_expr(assigned);
+                // Declaration without an assignment.
+                return Stmt::VarDecl {
+                    decl_type,
+                    name: identifier,
+                    value: assigned_ref,
+                };
             }
-            _ => self.expression(),
-        };
-        */
-        self.eat(&Token::SemiColon);
-        self.statement()
+            // Variable declaration with right value assignment.
+            &Token::Equal => {
+                let assigned = self.expression();
+                self.eat(&Token::SemiColon);
+                return Stmt::VarDecl {
+                    decl_type,
+                    name: identifier,
+                    value: assigned,
+                };
+            }
+            // Function declaration.
+            &Token::LParen => {
+                // Function declaration.
+                self.eat(&Token::LParen);
+                // Arguments
+                self.eat(&Token::RParen);
+                // Body
+                self.eat(&Token::LBrace);
+                // self.block()
+                // End of body
+                self.eat(&Token::RBrace);
+                return Stmt::FuncDecl {
+                    name: identifier,
+                    return_type: decl_type,
+                    args: vec![],
+                    body: vec![],
+                };
+            }
+            _ => {
+                self.eat(&Token::SemiColon);
+                self.statement()
+            }
+        }
     }
 
     /// Parse a return statement.
