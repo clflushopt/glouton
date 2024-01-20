@@ -212,8 +212,7 @@ impl Parser {
         // Prefix part.
         let mut prefix_ref = match self.consume() {
             &Token::LParen => self.grouping(),
-            &Token::Minus => self.unary(),
-            &Token::Bang => self.unary(),
+            &Token::Minus | &Token::Bang => self.unary(),
             &Token::IntLiteral(value) => {
                 let literal_expr = Expr::IntLiteral(value);
                 self.ast.push_expr(literal_expr)
@@ -223,20 +222,54 @@ impl Parser {
             _ => todo!("Unexpected prefix token {}", self.prev()),
         };
 
+        // println!("Infix expression: {:?}", self.ast.get_expr(prefix_ref));
+        // println!("Precedence : {:?}", prec);
+
         while prec < self.tok_precedence(self.peek()) {
             let infix_ref = match self.consume() {
-                &Token::Plus => self.binary(prefix_ref),
-                &Token::Minus => self.binary(prefix_ref),
-                &Token::Star => self.binary(prefix_ref),
-                &Token::Slash => self.binary(prefix_ref),
+                // Arithmetic expressions.
+                &Token::Plus | &Token::Minus | &Token::Star | &Token::Slash => {
+                    self.binary(prefix_ref)
+                }
+                // Comparison expressions.
+                &Token::EqualEqual
+                | &Token::BangEqual
+                | &Token::GreaterEqual
+                | &Token::Greater
+                | &Token::LesserEqual
+                | &Token::Lesser => self.comparison(prefix_ref),
+                // Call expressions.
                 &Token::LParen => self.call(prefix_ref),
                 _ => todo!("Unexpected infix token {}", self.peek()),
             };
 
+            // println!("Infix expression : {:?}", self.ast.get_expr(infix_ref));
             prefix_ref = infix_ref;
         }
 
         prefix_ref
+    }
+
+    /// Parse a comparison expression.
+    fn comparison(&mut self, left: ExprRef) -> ExprRef {
+        let operator = match self.prev() {
+            &Token::Lesser => BinaryOperator::Lt,
+            &Token::LesserEqual => BinaryOperator::Lte,
+            &Token::Greater => BinaryOperator::Gt,
+            &Token::GreaterEqual => BinaryOperator::Gte,
+            &Token::EqualEqual => BinaryOperator::Eq,
+            &Token::BangEqual => BinaryOperator::Neq,
+            // There is no infix operator.
+            _ => unreachable!("Unknown token in binary expression {}", self.peek()),
+        };
+
+        let precedence = (self.tok_precedence(self.prev()) as u8 + 1).into();
+        let right = self.precedence(precedence);
+        self.ast.push_expr(Expr::BinOp {
+            left,
+            operator,
+            right,
+        })
     }
 
     /// Parse a binary expression.
@@ -249,7 +282,7 @@ impl Parser {
             // There is no infix operator.
             _ => unreachable!("Unknown token in binary expression {}", self.peek()),
         };
-        let precedence = (self.tok_precedence(self.prev()) as u8 + 1).into();
+        let precedence = self.tok_precedence(self.prev()).into();
         let right = self.precedence(precedence);
         self.ast.push_expr(Expr::BinOp {
             left,
@@ -347,15 +380,17 @@ impl Parser {
             &Token::Plus => Precedence::Term,
             &Token::Slash => Precedence::Factor,
             &Token::Star => Precedence::Factor,
-            &Token::Equal => Precedence::Assignment,
             &Token::Or => Precedence::Or,
             &Token::And => Precedence::And,
-            &Token::EqualEqual => Precedence::Comparison,
-            &Token::BangEqual => Precedence::Comparison,
+            &Token::EqualEqual => Precedence::Equal,
+            &Token::BangEqual => Precedence::Equal,
             &Token::Greater => Precedence::Comparison,
             &Token::GreaterEqual => Precedence::Comparison,
             &Token::Lesser => Precedence::Comparison,
             &Token::LesserEqual => Precedence::Comparison,
+            // Assignment.
+            &Token::Equal => Precedence::Assignment,
+            // Call.
             &Token::LParen => Precedence::Call,
             _ => Precedence::None,
         }
@@ -511,5 +546,29 @@ mod tests {
         can_parse_call_expression_with_no_arguments,
         "int z = foo()",
         "VAR(INT_TYPE, z, Call(Named(foo), Args()))"
+    );
+
+    test_parser!(
+        can_parse_greater_than_equal_expression,
+        "5 + 3 * 10 >= 2",
+        "Expr(GreaterEqual(Add(5, Mul(3, 10)), 2))"
+    );
+
+    test_parser!(
+        can_parse_equality_expression,
+        "5 + 7 * 10 / 2 == 0",
+        "Expr(Equal(Add(5, Div(Mul(7, 10), 2)), 0))"
+    );
+
+    test_parser!(
+        can_parse_call_with_equality_expression,
+        "1 + 1 == f(a,b);",
+        "Expr(Equal(Add(1, 1), Call(Named(f), Args(Named(a), Named(b)))))"
+    );
+
+    test_parser!(
+        can_parse_inequality_with_calls,
+        "g(a,b) != f(a,b);",
+        "Expr(NotEqual(Call(Named(g), Args(Named(a), Named(b))), Call(Named(f), Args(Named(a), Named(b)))))"
     );
 }

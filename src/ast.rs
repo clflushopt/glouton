@@ -111,10 +111,18 @@ impl StmtPool {
 /// Binary operators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOperator {
+    // Arithmetic operators.
     Add,
     Sub,
     Mul,
     Div,
+    // Comparison operators.
+    Eq,
+    Neq,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
 }
 
 impl fmt::Display for BinaryOperator {
@@ -124,6 +132,12 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::Sub => write!(f, "SUB"),
             BinaryOperator::Mul => write!(f, "MUL"),
             BinaryOperator::Div => write!(f, "DIV"),
+            BinaryOperator::Eq => write!(f, "EQU"),
+            BinaryOperator::Neq => write!(f, "NEQ"),
+            BinaryOperator::Gt => write!(f, "GT"),
+            BinaryOperator::Gte => write!(f, "GTE"),
+            BinaryOperator::Lt => write!(f, "LT"),
+            BinaryOperator::Lte => write!(f, "LTE"),
         }
     }
 }
@@ -359,6 +373,48 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                         }
                         BinaryOperator::Div => {
                             format!("Div({}, {})", self.visit_expr(left), self.visit_expr(right))
+                        }
+                        BinaryOperator::Eq => {
+                            format!(
+                                "Equal({}, {})",
+                                self.visit_expr(left),
+                                self.visit_expr(right)
+                            )
+                        }
+                        BinaryOperator::Neq => {
+                            format!(
+                                "NotEqual({}, {})",
+                                self.visit_expr(left),
+                                self.visit_expr(right)
+                            )
+                        }
+                        BinaryOperator::Gt => {
+                            format!(
+                                "Greater({}, {})",
+                                self.visit_expr(left),
+                                self.visit_expr(right)
+                            )
+                        }
+                        BinaryOperator::Gte => {
+                            format!(
+                                "GreaterEqual({}, {})",
+                                self.visit_expr(left),
+                                self.visit_expr(right)
+                            )
+                        }
+                        BinaryOperator::Lt => {
+                            format!(
+                                "Lesser({}, {})",
+                                self.visit_expr(left),
+                                self.visit_expr(right)
+                            )
+                        }
+                        BinaryOperator::Lte => {
+                            format!(
+                                "LesserEqual({}, {})",
+                                self.visit_expr(left),
+                                self.visit_expr(right)
+                            )
                         }
                     }
                 } else {
