@@ -201,6 +201,11 @@ pub enum Expr {
         operator: UnaryOperator,
         operand: ExprRef,
     },
+    // Function calls.
+    Call {
+        name: ExprRef,
+        args: Vec<ExprRef>,
+    },
 }
 
 /// Statement nodes are used to represent statements.
@@ -370,6 +375,28 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
             Expr::Named(name) => {
                 let name = name.clone();
                 format!("Named({name})")
+            }
+            Expr::Call {
+                name: name_ref,
+                args,
+            } => {
+                if let Some(name) = self.ast.get_expr(*name_ref) {
+                    let mut call_str = format!("Call({}, Args(", self.visit_expr(name));
+                    for arg in args {
+                        match self.ast.get_expr(*arg) {
+                            Some(arg) => {
+                                let formatted_arg = self.visit_expr(arg);
+                                call_str += &format!("{}, ", formatted_arg);
+                            }
+                            _ => (),
+                        }
+                    }
+                    call_str = call_str.trim_end_matches(", ").to_string();
+                    call_str += &format!("))");
+                    call_str
+                } else {
+                    unreachable!("expected call expression to have at least one named value")
+                }
             }
             _ => todo!("Unimplemented display for Node {:?}", expr),
         }

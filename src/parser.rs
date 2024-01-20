@@ -229,6 +229,7 @@ impl Parser {
                 &Token::Minus => self.binary(prefix_ref),
                 &Token::Star => self.binary(prefix_ref),
                 &Token::Slash => self.binary(prefix_ref),
+                &Token::LParen => self.call(prefix_ref),
                 _ => todo!("Unexpected infix token {}", self.peek()),
             };
 
@@ -302,6 +303,35 @@ impl Parser {
         }
     }
 
+    /// Parse a call expression such as "f(a,b,c)", `name` is parsed
+    /// as a prefix expression and represents the function name since `CallExpr`
+    /// is considered infix.
+    fn call(&mut self, name: ExprRef) -> ExprRef {
+        let mut args = vec![];
+
+        if !self.match_next(&Token::RParen) {
+            while !self.match_next(&Token::RParen) {
+                args.push(self.expression());
+
+                if !self.match_next(&Token::Comma) {
+                    break;
+                }
+            }
+        }
+
+        self.eat(&Token::RParen);
+
+        self.ast.push_expr(Expr::Call { name, args })
+    }
+
+    fn match_next(&mut self, expected: &Token) -> bool {
+        if self.peek() != expected {
+            return false;
+        }
+        self.consume();
+        true
+    }
+
     /// Parse an expression statement.
     fn expr_stmt(&mut self) -> Stmt {
         let expr_ref = self.expression();
@@ -318,6 +348,15 @@ impl Parser {
             &Token::Slash => Precedence::Factor,
             &Token::Star => Precedence::Factor,
             &Token::Equal => Precedence::Assignment,
+            &Token::Or => Precedence::Or,
+            &Token::And => Precedence::And,
+            &Token::EqualEqual => Precedence::Comparison,
+            &Token::BangEqual => Precedence::Comparison,
+            &Token::Greater => Precedence::Comparison,
+            &Token::GreaterEqual => Precedence::Comparison,
+            &Token::Lesser => Precedence::Comparison,
+            &Token::LesserEqual => Precedence::Comparison,
+            &Token::LParen => Precedence::Call,
             _ => Precedence::None,
         }
     }
@@ -460,5 +499,17 @@ mod tests {
         can_parse_variable_declaration_with_expression,
         "int b = (5 * 3 / 1 + 4 - 2);",
         "VAR(INT_TYPE, b, Grouping(Sub(Add(Div(Mul(5, 3), 1), 4), 2)))"
+    );
+
+    test_parser!(
+        can_parse_call_expression_with_arguments,
+        "int x = f(a,b,c);",
+        "VAR(INT_TYPE, x, Call(Named(f), Args(Named(a), Named(b), Named(c))))"
+    );
+
+    test_parser!(
+        can_parse_call_expression_with_no_arguments,
+        "int z = foo()",
+        "VAR(INT_TYPE, z, Call(Named(foo), Args()))"
     );
 }
