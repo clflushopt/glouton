@@ -41,7 +41,7 @@
 //! [1]: https://www.cs.cornell.edu/~asampson/blog/flattening.html
 
 use core::fmt;
-use std::clone;
+
 
 /// Node references are represented as `usize` handles to the AST arena
 /// this avoides type casting everytime we want to access a node and down
@@ -502,10 +502,10 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 format!("ARG({}, {})", decl_type, name)
             }
             Stmt::FuncDecl {
-                name,
-                return_type,
-                args,
-                body,
+                name: _,
+                return_type: _,
+                args: _,
+                body: _,
             } => {
                 todo!("Unimplemented display trait for function declaration")
             }

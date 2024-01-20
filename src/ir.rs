@@ -95,8 +95,8 @@ impl<'a> IRGenerator<'a> {
                     }
                 }
                 ast::Stmt::VarDecl {
-                    decl_type,
-                    name,
+                    decl_type: _,
+                    name: _,
                     value,
                 } => {
                     if let Some(expr) = self.ast.get_expr(*value) {
@@ -120,7 +120,7 @@ impl<'a> IRGenerator<'a> {
 }
 
 impl<'a> ast::Visitor<u32> for IRGenerator<'a> {
-    fn visit_stmt(&mut self, stmt: &ast::Stmt) -> u32 {
+    fn visit_stmt(&mut self, _stmt: &ast::Stmt) -> u32 {
         0
     }
     fn visit_expr(&mut self, expr: &ast::Expr) -> u32 {
@@ -136,7 +136,7 @@ impl<'a> ast::Visitor<u32> for IRGenerator<'a> {
             &ast::Expr::UnaryOp { operator, operand } => {
                 if let Some(operand) = self.ast.get_expr(operand) {
                     self.var_count += 1;
-                    let dst = self.visit_expr(operand);
+                    let _dst = self.visit_expr(operand);
                     match operator {
                         ast::UnaryOperator::Neg => self.var_count,
                         ast::UnaryOperator::Not => self.var_count,

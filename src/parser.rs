@@ -1,6 +1,6 @@
 //! The nice thing about this implementation is that it builds a purely flat
 //! AST that uses arenas and handles to represent the tree.
-use crate::ast::{BinaryOperator, DeclType, Expr, ExprRef, Stmt, StmtRef, UnaryOperator, AST};
+use crate::ast::{BinaryOperator, DeclType, Expr, ExprRef, Stmt, UnaryOperator, AST};
 use crate::token::Token;
 
 /// Operator precedence tablet.
