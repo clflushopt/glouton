@@ -1,6 +1,6 @@
 //! The nice thing about this implementation is that it builds a purely flat
 //! AST that uses arenas and handles to represent the tree.
-use crate::ast::{BinaryOperator, DeclType, Expr, ExprRef, Stmt, UnaryOperator, AST};
+use crate::ast::{BinaryOperator, DeclType, Expr, ExprRef, Stmt, StmtRef, UnaryOperator, AST};
 use crate::token::Token;
 
 /// Operator precedence tablet.
@@ -23,7 +23,7 @@ pub enum Precedence {
     Term = 6,
     // Multiply, divide, modulo.
     Factor = 7,
-    // Logical not, unary minutes, pointer dereference
+    // Logical not, unary negation, pointer dereference
     // increment, decrement.
     Unary = 8,
     // Function calls, array subscript, structure field reference.
@@ -99,6 +99,7 @@ impl Parser {
     fn statement(&mut self) -> Stmt {
         match self.peek() {
             &Token::Return => self.return_stmt(),
+            &Token::LBrace => self.block(),
             _ => self.expr_stmt(),
         }
     }
@@ -169,6 +170,30 @@ impl Parser {
         }
     }
 
+    /// Parse a block.
+    fn block(&mut self) -> Stmt {
+        Stmt::Block(vec![])
+    }
+
+    /// Parse an if statement.
+    fn if_stmt(&mut self) -> Stmt {
+        self.eat(&Token::If);
+        // Opening parenthesis.
+        self.eat(&Token::LParen);
+        // Parse conditional expression.
+        let conditional = self.expression();
+        // Closing parenthesis.
+        self.eat(&Token::RParen);
+        // Body of the conditional branch, maybe some day we will support next
+        // line statements. For now, expect a brace.
+        self.eat(&Token::LBrace);
+        // Conditional block.
+        let body = self.block();
+        let body_ref = self.ast.push_stmt(body);
+        // Optional part.
+        Stmt::If(conditional, body_ref, None)
+    }
+
     /// Parse a return statement.
     fn return_stmt(&mut self) -> Stmt {
         self.eat(&Token::Return);
@@ -194,6 +219,7 @@ impl Parser {
                 self.ast.push_expr(literal_expr)
             }
             &Token::Equal => self.assignment(),
+            Token::Identifier(_) => self.named(),
             _ => todo!("Unexpected prefix token {}", self.prev()),
         };
 
@@ -262,6 +288,18 @@ impl Parser {
         let expr_ref = self.precedence(Precedence::None);
         self.eat(&Token::SemiColon);
         expr_ref
+    }
+
+    /// Parse a named expression such as "x".
+    fn named(&mut self) -> ExprRef {
+        // Consume the token and build a named expr.
+        match self.prev() {
+            Token::Identifier(ident) => self.ast.push_expr(Expr::Named(ident.to_string())),
+            _ => unreachable!(
+                "Expected identifier in named expression got {}",
+                self.prev()
+            ),
+        }
     }
 
     /// Parse an expression statement.
@@ -395,9 +433,27 @@ mod tests {
     );
 
     test_parser!(
+        can_parse_assignment_with_prefix,
+        "int x = !a;",
+        "VAR(INT_TYPE, x, Not(Named(a)))"
+    );
+
+    test_parser!(
+        can_parse_assignment_with_prefix_operator,
+        "int x = -5;",
+        "VAR(INT_TYPE, x, Neg(5))"
+    );
+
+    test_parser!(
         can_parse_non_assigned_declaration,
         "int x;",
         "VAR(INT_TYPE, x, 0)"
+    );
+
+    test_parser!(
+        can_parse_named_assignment,
+        "int x = y;",
+        "VAR(INT_TYPE, x, Named(y))"
     );
 
     test_parser!(

@@ -41,6 +41,7 @@
 //! [1]: https://www.cs.cornell.edu/~asampson/blog/flattening.html
 
 use core::fmt;
+use std::clone;
 
 /// Node references are represented as `usize` handles to the AST arena
 /// this avoides type casting everytime we want to access a node and down
@@ -365,6 +366,10 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 } else {
                     unreachable!("unary node is missing operand")
                 }
+            }
+            Expr::Named(name) => {
+                let name = name.clone();
+                format!("Named({name})")
             }
             _ => todo!("Unimplemented display for Node {:?}", expr),
         }
