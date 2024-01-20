@@ -549,6 +549,12 @@ mod tests {
     );
 
     test_parser!(
+        can_parse_unary_call_expression,
+        "int z = !foo()",
+        "VAR(INT_TYPE, z, Not(Call(Named(foo), Args())))"
+    );
+
+    test_parser!(
         can_parse_greater_than_equal_expression,
         "5 + 3 * 10 >= 2",
         "Expr(GreaterEqual(Add(5, Mul(3, 10)), 2))"
