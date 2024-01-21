@@ -26,27 +26,50 @@
 //! is constructed bottom-up and so all child leafs will be located before
 //! their parents in the flat representation.
 //!
-//! For expressions this works out and doesn't cause an issue since all node
-//! references will be backwards, for example :
+//! For expressions this is fine and doesn't cause an issue since all node
+//! references will be backwards consuming it in order (left to right) or
+//! out of order works the same.
 //!
-//! a * b => [Named(a), Named(b), BinExpr(Mul, Ref(a), Ref(b))]
+//! ```
+//! a * b => [Named(a), Named(b), BinExpr(Mul, Ref(0), Ref(1))]
+//!```
 //!
-//! For statements this isn't an issue while building the tree but consuming it
-//! becomes less ergonomic, consider the following example :
+//! For statements this makes traversal less ergonomic as you will encounter
+//! child nodes before their parent, which can be problematic when dealing
+//! with scopes.
 //!
+//! Consider the following
+//!
+//! ```
 //! {
 //!     int a;
 //!     int b;
 //! }
+//! ```
 //!
-//! When parsing blocks we encounter declarations first, if our node in the AST
-//! that represents a block looks like `Block(Vec<Ref>)` then consuming this
-//! naively will end up encountering the declarations *before* the actual block.
+//! The equivalent naive construction will yield the following :
+//!
+//! ```
+//! [VarDecl(int, a), VarDecl(int, b), Block([Ref(0), Ref(1)])
+//!
+//! ```
+//!
+//! Processing the above left to right means seeing declarations out of context
+//! i.e their scope, as such consumers will generate wrong output be it code
+//! or textual representation.
 //!
 //! To remedy this issue our AST is built on three layered vectors, the first
 //! layer represents the top level declaration and statements, these are what
 //! our program is composed of. Scoped statements and declarations sit in the
 //! second layer and finally expressions are at the last layer.
+//!
+//! The above example is laid out as such in memory :
+//!
+//! ```
+//! declarations: [Block([RefStmt(0), RefStmt(1)])]
+//! statements: [VarDecl(int, a), VarDecl(int, b)]
+//!
+//! ```
 //!
 //! When walking the AST we just need to consume the declarations vector left
 //! to right, since all references in it *flow downwards* and thus we don't
@@ -63,12 +86,11 @@
 //!
 //!
 //! This approach is not new and has been used in LuaJIT, Zig, Sorbet, ECS
-//! game engines and more, see[1] for more details.
+//! game engines and more, see [1] for more details.
 //!
 //! [1]: https://www.cs.cornell.edu/~asampson/blog/flattening.html
 
 use core::fmt;
-use std::fmt::format;
 
 /// Node references are represented as `usize` handles to the AST arena
 /// this avoides type casting everytime we want to access a node and down

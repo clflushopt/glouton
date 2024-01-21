@@ -705,4 +705,20 @@ Stmt(VAR(INT_TYPE, x, Mul(Named(a), Named(b)))),
 Stmt(Return(Named(x))),
 })"
     );
+
+    test_parser!(
+        can_parse_nested_blocks,
+        r#"
+{
+    {
+        int x;
+    }
+}
+"#,
+        "Block {
+Stmt(Block {
+Stmt(VAR(INT_TYPE, x, 0)),
+}),
+}"
+    );
 }
