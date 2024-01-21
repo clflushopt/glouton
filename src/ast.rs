@@ -14,12 +14,43 @@
 //! references are not an issue anymore because there is no lifetime associated
 //! with the reference you use, the lifetime is now associated with the entire
 //! arena and the individual entries hold indices into the arena which are just
-//! `u32`.
+//! `usize`.
 //!
 //! Another argument although less impressive at this scale is speed, because
 //! fetches aren't done via pointers and because AST nodes have nice locality
 //! if your arena fits in cache then walking it becomes much faster than going
 //! through the pointer fetch road.
+//!
+//! One downside of this representation is that it requires being careful when
+//! implementing consumers of the AST. This comes from the fact that the AST
+//! is constructed bottom-up and so all child leafs will be located before
+//! their parents in the flat representation.
+//!
+//! For expressions this works out and doesn't cause an issue since all node
+//! references will be backwards, for example :
+//!
+//! a * b => [Named(a), Named(b), BinExpr(Mul, Ref(a), Ref(b))]
+//!
+//! For statements this isn't an issue while building the tree but consuming it
+//! becomes less ergonomic, consider the following example :
+//!
+//! {
+//!     int a;
+//!     int b;
+//! }
+//!
+//! When parsing blocks we encounter declarations first, if our node in the AST
+//! that represents a block looks like `Block(Vec<Ref>)` then consuming this
+//! naively will end up encountering the declarations *before* the actual block.
+//!
+//! To remedy this issue our AST is built on three layered vectors, the first
+//! layer represents the top level declaration and statements, these are what
+//! our program is composed of. Scoped statements and declarations sit in the
+//! second layer and finally expressions are at the last layer.
+//!
+//! When walking the AST we just need to consume the declarations vector left
+//! to right, since all references in it *flow downwards* and thus we don't
+//! meet child nodes before their parents.
 //!
 //! One point that must need to be though of before using the approach is how
 //! the ownership of references is "oriented", i.e is your lifetime represented
@@ -27,13 +58,9 @@
 //! or path of ownership could hinder the design.
 //!
 //! In our case the AST represents a program, the root node is an entry point
-//! and the program itself is a sequence of *statements*. Where each statement
-//! either represents control flow or expressions. Since expressions *will not*
-//! reference *statements*, the AST can be represented as a tuple of `StmtPool`
-//! and `ExprPool`.
+//! and the program itself is a sequence of *declarations*. Where each statement
+//! either represents a variable or function declaration followed by statements
 //!
-//! Where `StmtPool` holds the statement nodes, each node holds an `ExprRef`
-//! that can reference an expression or a `StmtRef` that references statements.
 //!
 //! This approach is not new and has been used in LuaJIT, Zig, Sorbet, ECS
 //! game engines and more, see[1] for more details.
@@ -41,7 +68,7 @@
 //! [1]: https://www.cs.cornell.edu/~asampson/blog/flattening.html
 
 use core::fmt;
-
+use std::fmt::format;
 
 /// Node references are represented as `usize` handles to the AST arena
 /// this avoides type casting everytime we want to access a node and down
@@ -243,14 +270,14 @@ pub enum Stmt {
         name: String,
         return_type: DeclType,
         args: Vec<StmtRef>,
-        body: Vec<StmtRef>,
+        body: StmtRef,
     },
     // Expression statements.
     Expr(ExprRef),
     // Blocks are sequence of statements.
     Block(Vec<StmtRef>),
     // If statements.
-    If(ExprRef, StmtRef, Option<StmtRef>),
+    If(ExprRef, StmtRef, Option<Vec<Stmt>>),
     // Loops are represented as While loops and For loops are de-sugarized into `While` loops.
     While(ExprRef, StmtRef),
     // Empty statement.
@@ -261,6 +288,7 @@ pub enum Stmt {
 /// of tokens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AST {
+    declarations: StmtPool,
     statements: StmtPool,
     expressions: ExprPool,
 }
@@ -278,7 +306,7 @@ pub trait Visitor<T> {
 impl fmt::Display for AST {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut displayer = ASTDisplayer::new(self);
-        for stmt in &self.statements.nodes {
+        for stmt in &self.declarations.nodes {
             write!(f, "{}", displayer.visit_stmt(&stmt))?;
         }
         Ok(())
@@ -289,9 +317,15 @@ impl AST {
     /// Create a new empty AST.
     pub fn new() -> Self {
         Self {
+            declarations: StmtPool::new(),
             statements: StmtPool::new(),
             expressions: ExprPool::new(),
         }
+    }
+
+    /// Return a non-mutable reference to the declaration pool.
+    pub fn declaration(&self) -> &Vec<Stmt> {
+        &self.declarations.nodes
     }
 
     /// Return a non-mutable reference to the statement pool.
@@ -304,6 +338,11 @@ impl AST {
         &self.expressions.nodes
     }
 
+    /// Push a new declaration node to the AST returning a reference to it.
+    pub fn push_decl(&mut self, decl: Stmt) -> StmtRef {
+        self.declarations.add(decl)
+    }
+
     /// Push a new statement node to the AST returning a reference to it.
     pub fn push_stmt(&mut self, stmt: Stmt) -> StmtRef {
         self.statements.add(stmt)
@@ -314,16 +353,22 @@ impl AST {
         self.expressions.add(expr)
     }
 
-    /// Fetches an expression node by its reference, returning `None`
-    /// if the expression doesn't exist.
-    pub fn get_expr(&self, expr_ref: ExprRef) -> Option<&Expr> {
-        self.expressions.get(expr_ref)
+    /// Fetches a declaration node by its reference, returning `None`
+    /// if the declaration node deosn't exist.
+    pub fn get_decl(&self, decl_ref: StmtRef) -> Option<&Stmt> {
+        self.declarations.get(decl_ref)
     }
 
     /// Fetches a statement node by its reference, returning `None`
     /// if the statement node deosn't exist.
     pub fn get_stmt(&self, stmt_ref: StmtRef) -> Option<&Stmt> {
         self.statements.get(stmt_ref)
+    }
+
+    /// Fetches an expression node by its reference, returning `None`
+    /// if the expression doesn't exist.
+    pub fn get_expr(&self, expr_ref: ExprRef) -> Option<&Expr> {
+        self.expressions.get(expr_ref)
     }
 }
 
@@ -343,6 +388,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
     fn visit_expr(&mut self, expr: &Expr) -> String {
         match expr {
             &Expr::IntLiteral(value) => value.to_string(),
+            &Expr::BoolLiteral(value) => value.to_string(),
             &Expr::UnaryOp { operator, operand } => {
                 if let Some(operand) = self.ast.get_expr(operand) {
                     match operator {
@@ -488,26 +534,63 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 }
             }
             Stmt::Block(stmts) => {
-                let mut s = "".to_string();
-                for stmt in stmts {
-                    if let Some(stmt) = self.ast.get_stmt(*stmt) {
-                        s += &format!("Stmt({})", self.visit_stmt(&stmt)).to_string();
+                let mut s = "Block {\n".to_string();
+                for stmt_ref in stmts {
+                    if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
+                        s += &format!("Stmt({}),\n", self.visit_stmt(&stmt)).to_string();
                     } else {
-                        unreachable!("Missing statement for ref {:?}", stmt);
+                        unreachable!("Block is missing statement ref")
                     }
                 }
+                s += "}";
                 s
             }
             Stmt::FuncArg { decl_type, name } => {
                 format!("ARG({}, {})", decl_type, name)
             }
             Stmt::FuncDecl {
-                name: _,
-                return_type: _,
-                args: _,
-                body: _,
+                name,
+                return_type,
+                args,
+                body,
             } => {
-                todo!("Unimplemented display trait for function declaration")
+                let mut args_str = "".to_owned();
+                for arg in args {
+                    if let Some(arg) = self.ast.get_stmt(*arg) {
+                        let arg_str = self.visit_stmt(arg);
+                        args_str += &arg_str;
+                        args_str += ", ";
+                    }
+                }
+
+                args_str = args_str.trim_end_matches(", ").to_string();
+
+                let body = match self.ast.get_stmt(*body) {
+                    Some(body) => body,
+                    None => unreachable!("function is missing body"),
+                };
+                format!(
+                    "FUNCTION({}, {}, ARGS({}), {}",
+                    name,
+                    return_type,
+                    args_str,
+                    self.visit_stmt(body)
+                )
+            }
+            Stmt::If(condition_ref, then_ref, else_ref) => {
+                let cond = if let Some(cond_expr) = self.ast.get_expr(*condition_ref) {
+                    format!("{}", self.visit_expr(cond_expr),)
+                } else {
+                    unreachable!("missing condition for if statement")
+                };
+
+                let then = if let Some(body) = self.ast.get_stmt(*then_ref) {
+                    format!("{}", self.visit_stmt(body))
+                } else {
+                    "".to_string()
+                };
+
+                format!("IF({}, {})", cond, then)
             }
             Stmt::Empty => unreachable!(
                 "empty statement is a temporary placeholder and should not be in the ast"

@@ -184,7 +184,7 @@ impl<'a> ast::Visitor<u32> for IRGenerator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ir::{IRGenerator, Instruction};
+    use crate::ir::{IRGenerator};
     use crate::parser::Parser;
     use crate::scanner::Scanner;
 

@@ -1,6 +1,6 @@
-//! The nice thing about this implementation is that it builds a purely flat
-//! AST that uses arenas and handles to represent the tree.
-use crate::ast::{BinaryOperator, DeclType, Expr, ExprRef, Stmt, UnaryOperator, AST};
+//! Parser for a subset of C0 language that uses Pratt's approach to parsing
+//! expressions and a flat representation for the AST.
+use crate::ast::{BinaryOperator, DeclType, Expr, ExprRef, Stmt, StmtRef, UnaryOperator, AST};
 use crate::token::Token;
 
 /// Operator precedence tablet.
@@ -60,7 +60,7 @@ pub struct Parser {
     tokens: Vec<Token>,
     // Cursor in the tokens list.
     cursor: usize,
-    /// Constructed AST>
+    /// Constructed AST.
     ast: AST,
 }
 
@@ -91,7 +91,7 @@ impl Parser {
         //             | statement;
         while !self.eof() {
             let decl = self.declaration();
-            self.ast.push_stmt(decl);
+            self.ast.push_decl(decl);
         }
     }
 
@@ -100,6 +100,7 @@ impl Parser {
         match self.peek() {
             &Token::Return => self.return_stmt(),
             &Token::LBrace => self.block(),
+            &Token::If => self.if_stmt(),
             _ => self.expr_stmt(),
         }
     }
@@ -108,8 +109,11 @@ impl Parser {
     fn declaration(&mut self) -> Stmt {
         if self.peek() != &Token::Int && self.peek() != &Token::Char && self.peek() != &Token::Bool
         {
+            println!("Parsing statement : {}", self.peek());
             return self.statement();
         }
+
+        println!("Parsing declaration : {}", self.peek());
 
         let decl_type = match self.consume() {
             &Token::Int => DeclType::Int,
@@ -147,20 +151,23 @@ impl Parser {
             }
             // Function declaration.
             &Token::LParen => {
+                println!("Parsing function");
                 // Function declaration.
                 self.eat(&Token::LParen);
                 // Arguments
+                let args = self.args();
                 self.eat(&Token::RParen);
                 // Body
                 self.eat(&Token::LBrace);
-                // self.block()
+                let body = self.block();
+                let body_ref = self.ast.push_stmt(body);
                 // End of body
                 self.eat(&Token::RBrace);
                 return Stmt::FuncDecl {
                     name: identifier,
                     return_type: decl_type,
-                    args: vec![],
-                    body: vec![],
+                    args,
+                    body: body_ref,
                 };
             }
             _ => {
@@ -170,9 +177,56 @@ impl Parser {
         }
     }
 
-    /// Parse a block.
+    /// Parse function arguments.
+    fn args(&mut self) -> Vec<StmtRef> {
+        let mut args = vec![];
+        if !self.check(&Token::RParen) {
+            loop {
+                println!("Current token : {}", self.peek());
+                let arg_type = match self.consume() {
+                    &Token::Int => DeclType::Int,
+                    &Token::Char => DeclType::Char,
+                    &Token::Bool => DeclType::Bool,
+                    _ => unreachable!("expected type declaration found {}", self.peek()),
+                };
+
+                let arg_name = match self.consume() {
+                    Token::Identifier(name) => name.clone(),
+                    _ => unreachable!("expected identifier got {}", self.peek()),
+                };
+
+                let arg = Stmt::FuncArg {
+                    decl_type: arg_type,
+                    name: arg_name,
+                };
+                let arg_ref = self.ast.push_stmt(arg);
+                args.push(arg_ref);
+                if !self.match_next(&Token::Comma) {
+                    break;
+                }
+            }
+        }
+        args
+    }
+
+    /// Parse a block, parsing blocks requires using a different logic than
+    /// other statements.
+    ///
+    /// In an AST `Block` is the parent of child statements.
     fn block(&mut self) -> Stmt {
-        Stmt::Block(vec![])
+        let mut stmts = vec![];
+        println!("Parsing block");
+        // Parse and build the block.
+        self.eat(&Token::LBrace);
+        while !self.check(&Token::RBrace) && !self.eof() {
+            let stmt = self.declaration();
+            let stmt_ref = self.ast.push_stmt(stmt);
+
+            stmts.push(stmt_ref);
+        }
+        self.eat(&Token::RBrace);
+
+        Stmt::Block(stmts)
     }
 
     /// Parse an if statement.
@@ -191,6 +245,7 @@ impl Parser {
         let body = self.block();
         let body_ref = self.ast.push_stmt(body);
         // Optional part.
+        // Stmt::If(conditional, body_ref, None)
         Stmt::If(conditional, body_ref, None)
     }
 
@@ -217,6 +272,8 @@ impl Parser {
                 let literal_expr = Expr::IntLiteral(value);
                 self.ast.push_expr(literal_expr)
             }
+            &Token::True => self.ast.push_expr(Expr::BoolLiteral(true)),
+            &Token::False => self.ast.push_expr(Expr::BoolLiteral(false)),
             &Token::Equal => self.assignment(),
             Token::Identifier(_) => self.named(),
             _ => todo!("Unexpected prefix token {}", self.prev()),
@@ -453,6 +510,8 @@ mod tests {
                 let tokens = scanner.scan().unwrap();
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
+                let ast = parser.ast();
+                println!("Statement nodes: {:?}", ast.statements());
                 assert_eq!(parser.ast().to_string(), $expected);
             }
         };
@@ -576,5 +635,74 @@ mod tests {
         can_parse_inequality_with_calls,
         "g(a,b) != f(a,b);",
         "Expr(NotEqual(Call(Named(g), Args(Named(a), Named(b))), Call(Named(f), Args(Named(a), Named(b)))))"
+    );
+
+    test_parser!(
+        can_parse_unary_inequality,
+        "!true != !false",
+        "Expr(NotEqual(Not(true), Not(false)))"
+    );
+
+    test_parser!(
+        can_parse_blocks,
+        r#"{
+            int a = 10;
+            int b = 20;
+            int c = a + b;
+            int d = a * b + c;
+        }
+        "#,
+        "Block {
+Stmt(VAR(INT_TYPE, a, 10)),
+Stmt(VAR(INT_TYPE, b, 20)),
+Stmt(VAR(INT_TYPE, c, Add(Named(a), Named(b)))),
+Stmt(VAR(INT_TYPE, d, Add(Mul(Named(a), Named(b)), Named(c)))),
+}"
+    );
+
+    test_parser!(
+        can_parse_function_declaration,
+        r#"
+            int main() {
+                int a;
+                int b;
+                return a + b;
+            }
+        "#,
+        "FUNCTION(main, INT_TYPE, ARGS(), Block {
+Stmt(VAR(INT_TYPE, a, 0)),
+Stmt(VAR(INT_TYPE, b, 0)),
+Stmt(Return(Add(Named(a), Named(b)))),
+}"
+    );
+
+    test_parser!(
+        can_parse_function_declaration_with_arguments,
+        r#"
+            int main(int argc, char argv) {
+                int a;
+                int b;
+                return a + b;
+            }
+        "#,
+        "FUNCTION(main, INT_TYPE, ARGS(ARG(INT_TYPE, argc), ARG(CHAR_TYPE, argv)), Block {
+Stmt(VAR(INT_TYPE, a, 0)),
+Stmt(VAR(INT_TYPE, b, 0)),
+Stmt(Return(Add(Named(a), Named(b)))),
+}"
+    );
+
+    test_parser!(
+        can_parse_if_statements_without_else_block,
+        r#"
+        if (a > b) {
+            int x = a * b;
+            return x;
+        }
+        "#,
+        "IF(Greater(Named(a), Named(b)), Block {
+Stmt(VAR(INT_TYPE, x, Mul(Named(a), Named(b)))),
+Stmt(Return(Named(x))),
+})"
     );
 }
