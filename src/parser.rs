@@ -244,9 +244,20 @@ impl Parser {
         // Conditional block.
         let body = self.block();
         let body_ref = self.ast.push_stmt(body);
+        match self.peek() {
+            &Token::Else => {
+                // Consume else.
+                self.eat(&Token::Else);
+                // Consume opening brace for the block.
+                let else_body = self.block();
+                let else_body_ref = self.ast.push_stmt(else_body);
+                self.eat(&Token::LBrace);
+                Stmt::If(conditional, body_ref, Some(else_body_ref))
+            }
+            _ => Stmt::If(conditional, body_ref, None),
+        }
         // Optional part.
         // Stmt::If(conditional, body_ref, None)
-        Stmt::If(conditional, body_ref, None)
     }
 
     /// Parse a return statement.
@@ -702,6 +713,26 @@ Stmt(Return(Add(Named(a), Named(b)))),
         "#,
         "IF(Greater(Named(a), Named(b)), Block {
 Stmt(VAR(INT_TYPE, x, Mul(Named(a), Named(b)))),
+Stmt(Return(Named(x))),
+})"
+    );
+
+    test_parser!(
+        can_parse_if_statements_with_else_block,
+        r#"
+        if (a > b) {
+            int x = a * b;
+            return x;
+        } else {
+            int x = b / a;
+            return x;
+        }
+        "#,
+        "IF(Greater(Named(a), Named(b)), Block {
+Stmt(VAR(INT_TYPE, x, Mul(Named(a), Named(b)))),
+Stmt(Return(Named(x))),
+}, Block {
+Stmt(VAR(INT_TYPE, x, Div(Named(b), Named(a)))),
 Stmt(Return(Named(x))),
 })"
     );

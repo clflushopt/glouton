@@ -30,9 +30,9 @@
 //! references will be backwards consuming it in order (left to right) or
 //! out of order works the same.
 //!
-//! ```
+//!
 //! a * b => [Named(a), Named(b), BinExpr(Mul, Ref(0), Ref(1))]
-//!```
+//!
 //!
 //! For statements this makes traversal less ergonomic as you will encounter
 //! child nodes before their parent, which can be problematic when dealing
@@ -40,19 +40,19 @@
 //!
 //! Consider the following
 //!
-//! ```
+//!
 //! {
 //!     int a;
 //!     int b;
 //! }
-//! ```
+//!
 //!
 //! The equivalent naive construction will yield the following :
 //!
-//! ```
+//!
 //! [VarDecl(int, a), VarDecl(int, b), Block([Ref(0), Ref(1)])
 //!
-//! ```
+//!
 //!
 //! Processing the above left to right means seeing declarations out of context
 //! i.e their scope, as such consumers will generate wrong output be it code
@@ -65,11 +65,11 @@
 //!
 //! The above example is laid out as such in memory :
 //!
-//! ```
+//!
 //! declarations: [Block([RefStmt(0), RefStmt(1)])]
 //! statements: [VarDecl(int, a), VarDecl(int, b)]
 //!
-//! ```
+//!
 //!
 //! When walking the AST we just need to consume the declarations vector left
 //! to right, since all references in it *flow downwards* and thus we don't
@@ -299,7 +299,7 @@ pub enum Stmt {
     // Blocks are sequence of statements.
     Block(Vec<StmtRef>),
     // If statements.
-    If(ExprRef, StmtRef, Option<Vec<Stmt>>),
+    If(ExprRef, StmtRef, Option<StmtRef>),
     // Loops are represented as While loops and For loops are de-sugarized into `While` loops.
     While(ExprRef, StmtRef),
     // Empty statement.
@@ -599,20 +599,31 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                     self.visit_stmt(body)
                 )
             }
-            Stmt::If(condition_ref, then_ref, _else_ref) => {
+            Stmt::If(condition_ref, then_ref, else_ref) => {
                 let cond = if let Some(cond_expr) = self.ast.get_expr(*condition_ref) {
                     format!("{}", self.visit_expr(cond_expr),)
                 } else {
                     unreachable!("missing condition for if statement")
                 };
 
-                let then = if let Some(body) = self.ast.get_stmt(*then_ref) {
+                let then_block = if let Some(body) = self.ast.get_stmt(*then_ref) {
                     format!("{}", self.visit_stmt(body))
                 } else {
                     "".to_string()
                 };
 
-                format!("IF({}, {})", cond, then)
+                match else_ref {
+                    Some(else_ref) => {
+                        let else_block = if let Some(else_block) = self.ast.get_stmt(*else_ref) {
+                            format!("{}", self.visit_stmt(else_block))
+                        } else {
+                            "".to_string()
+                        };
+                        format!("IF({}, {}, {})", cond, then_block, else_block)
+                    }
+
+                    None => format!("IF({}, {})", cond, then_block),
+                }
             }
             Stmt::Empty => unreachable!(
                 "empty statement is a temporary placeholder and should not be in the ast"
