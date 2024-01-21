@@ -599,7 +599,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                     self.visit_stmt(body)
                 )
             }
-            Stmt::If(condition_ref, then_ref, else_ref) => {
+            Stmt::If(condition_ref, then_ref, _else_ref) => {
                 let cond = if let Some(cond_expr) = self.ast.get_expr(*condition_ref) {
                     format!("{}", self.visit_expr(cond_expr),)
                 } else {
