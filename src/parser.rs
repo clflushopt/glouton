@@ -109,11 +109,8 @@ impl Parser {
     fn declaration(&mut self) -> Stmt {
         if self.peek() != &Token::Int && self.peek() != &Token::Char && self.peek() != &Token::Bool
         {
-            println!("Parsing statement : {}", self.peek());
             return self.statement();
         }
-
-        println!("Parsing declaration : {}", self.peek());
 
         let decl_type = match self.consume() {
             &Token::Int => DeclType::Int,
@@ -151,7 +148,6 @@ impl Parser {
             }
             // Function declaration.
             &Token::LParen => {
-                println!("Parsing function");
                 // Function declaration.
                 self.eat(&Token::LParen);
                 // Arguments
@@ -182,7 +178,6 @@ impl Parser {
         let mut args = vec![];
         if !self.check(&Token::RParen) {
             loop {
-                println!("Current token : {}", self.peek());
                 let arg_type = match self.consume() {
                     &Token::Int => DeclType::Int,
                     &Token::Char => DeclType::Char,
@@ -215,7 +210,6 @@ impl Parser {
     /// In an AST `Block` is the parent of child statements.
     fn block(&mut self) -> Stmt {
         let mut stmts = vec![];
-        println!("Parsing block");
         // Parse and build the block.
         self.eat(&Token::LBrace);
         while !self.check(&Token::RBrace) && !self.eof() {
@@ -290,9 +284,6 @@ impl Parser {
             _ => todo!("Unexpected prefix token {}", self.prev()),
         };
 
-        // println!("Infix expression: {:?}", self.ast.get_expr(prefix_ref));
-        // println!("Precedence : {:?}", prec);
-
         while prec < self.tok_precedence(self.peek()) {
             let infix_ref = match self.consume() {
                 // Arithmetic expressions.
@@ -311,7 +302,6 @@ impl Parser {
                 _ => todo!("Unexpected infix token {}", self.peek()),
             };
 
-            // println!("Infix expression : {:?}", self.ast.get_expr(infix_ref));
             prefix_ref = infix_ref;
         }
 
@@ -522,7 +512,6 @@ mod tests {
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
                 let ast = parser.ast();
-                println!("Statement nodes: {:?}", ast.statements());
                 assert_eq!(parser.ast().to_string(), $expected);
             }
         };

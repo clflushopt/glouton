@@ -346,7 +346,7 @@ impl AST {
     }
 
     /// Return a non-mutable reference to the declaration pool.
-    pub fn declaration(&self) -> &Vec<Stmt> {
+    pub fn declarations(&self) -> &Vec<Stmt> {
         &self.declarations.nodes
     }
 

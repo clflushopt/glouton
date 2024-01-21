@@ -9,6 +9,42 @@ use core::fmt;
 
 use crate::ast::{self, Visitor};
 
+/// Types used in the IR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Type {
+    // Integers, defaults to i32.
+    Int,
+    // Booleans.
+    Bool,
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Int => write!(f, "int"),
+            Self::Bool => write!(f, "bool"),
+        }
+    }
+}
+
+/// Literal values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Literal {
+    /// Integers
+    Int(i32),
+    /// Booleans.
+    Bool(bool),
+}
+
+impl fmt::Display for Literal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Int(value) => write!(f, "{value}"),
+            Self::Bool(value) => write!(f, "{value}"),
+        }
+    }
+}
+
 /// Instruction are the atomic operations of the linear IR part in GIR
 /// they compose the building blocks of basic blocks.
 ///
@@ -41,12 +77,32 @@ pub enum Instruction {
     // to a destination variable, in case of literal values the destination
     // is either the variable defined in the AST in the case of assignment
     // expressions or a one created by the generator.
-    Const { value: i32, dst: u32 },
+    Const {
+        dst: u32,
+        const_type: Type,
+        const_value: Literal,
+    },
     // Arithmetic instructions are value operations.
-    Add { lhs: u32, rhs: u32, dst: u32 },
-    Sub { lhs: u32, rhs: u32, dst: u32 },
-    Mul { lhs: u32, rhs: u32, dst: u32 },
-    Div { lhs: u32, rhs: u32, dst: u32 },
+    Add {
+        lhs: u32,
+        rhs: u32,
+        dst: u32,
+    },
+    Sub {
+        lhs: u32,
+        rhs: u32,
+        dst: u32,
+    },
+    Mul {
+        lhs: u32,
+        rhs: u32,
+        dst: u32,
+    },
+    Div {
+        lhs: u32,
+        rhs: u32,
+        dst: u32,
+    },
     // Return instruction is an effect operation that transfers execution
     // back to the caller.
     Ret,
@@ -55,7 +111,11 @@ pub enum Instruction {
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            &Self::Const { value, dst } => write!(f, "var_{dst}: const {value}"),
+            &Self::Const {
+                dst,
+                const_type,
+                const_value,
+            } => write!(f, "var_{dst}: int = const {const_value}"),
             &Self::Add { lhs, rhs, dst } => write!(f, "var_{dst} = var_{lhs} + var_{rhs}"),
             _ => todo!("Unimplemented display for instruction {}", self),
         }
@@ -85,7 +145,7 @@ impl<'a> IRGenerator<'a> {
     }
 
     pub fn gen(&mut self) {
-        for stmt in self.ast.statements() {
+        for stmt in self.ast.declarations() {
             let _ = match stmt {
                 ast::Stmt::Return(expr_ref) => {
                     if let Some(expr) = self.ast.get_expr(*expr_ref) {
@@ -115,7 +175,6 @@ impl<'a> IRGenerator<'a> {
                 _ => todo!("unimplemented ir gen phase for stmt {:?}", stmt),
             };
         }
-        println!("IR dump {:?}", self.abstract_program);
     }
 }
 
@@ -128,7 +187,8 @@ impl<'a> ast::Visitor<u32> for IRGenerator<'a> {
             &ast::Expr::IntLiteral(value) => {
                 self.var_count += 1;
                 self.abstract_program.push(Instruction::Const {
-                    value,
+                    const_value: Literal::Int(value),
+                    const_type: Type::Int,
                     dst: self.var_count,
                 });
                 self.var_count
@@ -184,7 +244,7 @@ impl<'a> ast::Visitor<u32> for IRGenerator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ir::{IRGenerator};
+    use crate::ir::IRGenerator;
     use crate::parser::Parser;
     use crate::scanner::Scanner;
 
