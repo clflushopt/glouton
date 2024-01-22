@@ -109,6 +109,12 @@ pub struct ExprPool {
     nodes: Vec<Expr>,
 }
 
+impl Default for ExprPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExprPool {
     /// Create a new node pool with a pre-allocated capacity.
     pub fn new() -> Self {
@@ -134,6 +140,12 @@ impl ExprPool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StmtPool {
     nodes: Vec<Stmt>,
+}
+
+impl Default for StmtPool {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StmtPool {
@@ -329,9 +341,15 @@ impl fmt::Display for AST {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut displayer = ASTDisplayer::new(self);
         for stmt in &self.declarations.nodes {
-            write!(f, "{}", displayer.visit_stmt(&stmt))?;
+            write!(f, "{}", displayer.visit_stmt(stmt))?;
         }
         Ok(())
+    }
+}
+
+impl Default for AST {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -516,7 +534,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                         }
                     }
                     call_str = call_str.trim_end_matches(", ").to_string();
-                    call_str += &format!("))");
+                    call_str += "))";
                     call_str
                 } else {
                     unreachable!("expected call expression to have at least one named value")
@@ -530,7 +548,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
         match stmt {
             Stmt::Return(expr_ref) => {
                 if let Some(expr) = self.ast.get_expr(*expr_ref) {
-                    format!("Return({})", self.visit_expr(&expr))
+                    format!("Return({})", self.visit_expr(expr))
                 } else {
                     unreachable!("Return statement is missing expression ref")
                 }
@@ -542,7 +560,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
             } => {
                 let mut s = format!("VAR({}, {}", decl_type, name);
                 if let Some(expr) = self.ast.get_expr(*value) {
-                    s += &format!(", {})", self.visit_expr(&expr)).to_string();
+                    s += &format!(", {})", self.visit_expr(expr)).to_string();
                 } else {
                     unreachable!("Missing expression in assignment")
                 }
@@ -550,7 +568,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
             }
             Stmt::Expr(expr_ref) => {
                 if let Some(expr) = self.ast.get_expr(*expr_ref) {
-                    format!("Expr({})", self.visit_expr(&expr))
+                    format!("Expr({})", self.visit_expr(expr))
                 } else {
                     unreachable!("Expr statement is missing expression ref")
                 }
@@ -559,7 +577,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 let mut s = "Block {\n".to_string();
                 for stmt_ref in stmts {
                     if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
-                        s += &format!("Stmt({}),\n", self.visit_stmt(&stmt)).to_string();
+                        s += &format!("Stmt({}),\n", self.visit_stmt(stmt)).to_string();
                     } else {
                         unreachable!("Block is missing statement ref")
                     }
@@ -601,13 +619,13 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
             }
             Stmt::If(condition_ref, then_ref, else_ref) => {
                 let cond = if let Some(cond_expr) = self.ast.get_expr(*condition_ref) {
-                    format!("{}", self.visit_expr(cond_expr),)
+                    self.visit_expr(cond_expr).to_string()
                 } else {
                     unreachable!("missing condition for if statement")
                 };
 
                 let then_block = if let Some(body) = self.ast.get_stmt(*then_ref) {
-                    format!("{}", self.visit_stmt(body))
+                    self.visit_stmt(body).to_string()
                 } else {
                     "".to_string()
                 };
@@ -615,7 +633,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 match else_ref {
                     Some(else_ref) => {
                         let else_block = if let Some(else_block) = self.ast.get_stmt(*else_ref) {
-                            format!("{}", self.visit_stmt(else_block))
+                            self.visit_stmt(else_block).to_string()
                         } else {
                             "".to_string()
                         };

@@ -2,7 +2,7 @@
 use std::fmt::{self};
 
 /// Language defined keywords.
-pub const KEYWORDS: &'static [&'static str] = &[
+pub const KEYWORDS: &[&str] = &[
     "int", "char", "bool", "return", "const", "void", "if", "else", "while", "for", "break",
     "true", "false",
 ];

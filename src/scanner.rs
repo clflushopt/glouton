@@ -48,7 +48,7 @@ impl Error for ScannerError {
 
 impl Scanner<'_> {
     /// Creates a new lexer instance from a given `source` string.
-    pub fn new<'a>(source: &'a str) -> Scanner<'a> {
+    pub fn new(source: &str) -> Scanner<'_> {
         Scanner {
             input: source,
             start: 0,

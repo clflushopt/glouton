@@ -113,7 +113,7 @@ impl fmt::Display for Instruction {
         match self {
             &Self::Const {
                 dst,
-                const_type,
+                const_type: _,
                 const_value,
             } => write!(f, "var_{dst}: int = const {const_value}"),
             &Self::Add { lhs, rhs, dst } => write!(f, "var_{dst} = var_{lhs} + var_{rhs}"),
@@ -146,7 +146,7 @@ impl<'a> IRGenerator<'a> {
 
     pub fn gen(&mut self) {
         for stmt in self.ast.declarations() {
-            let _ = match stmt {
+            match stmt {
                 ast::Stmt::Return(expr_ref) => {
                     if let Some(expr) = self.ast.get_expr(*expr_ref) {
                         let _ = self.visit_expr(expr);

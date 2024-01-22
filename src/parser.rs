@@ -130,21 +130,21 @@ impl Parser {
                 let assigned = decl_type.default_value();
                 let assigned_ref = self.ast.push_expr(assigned);
                 // Declaration without an assignment.
-                return Stmt::VarDecl {
+                Stmt::VarDecl {
                     decl_type,
                     name: identifier,
                     value: assigned_ref,
-                };
+                }
             }
             // Variable declaration with right value assignment.
             &Token::Equal => {
                 let assigned = self.expression();
                 self.eat(&Token::SemiColon);
-                return Stmt::VarDecl {
+                Stmt::VarDecl {
                     decl_type,
                     name: identifier,
                     value: assigned,
-                };
+                }
             }
             // Function declaration.
             &Token::LParen => {
@@ -159,12 +159,12 @@ impl Parser {
                 let body_ref = self.ast.push_stmt(body);
                 // End of body
                 self.eat(&Token::RBrace);
-                return Stmt::FuncDecl {
+                Stmt::FuncDecl {
                     name: identifier,
                     return_type: decl_type,
                     args,
                     body: body_ref,
-                };
+                }
             }
             _ => {
                 self.eat(&Token::SemiColon);
@@ -340,7 +340,7 @@ impl Parser {
             // There is no infix operator.
             _ => unreachable!("Unknown token in binary expression {}", self.peek()),
         };
-        let precedence = self.tok_precedence(self.prev()).into();
+        let precedence = self.tok_precedence(self.prev());
         let right = self.precedence(precedence);
         self.ast.push_expr(Expr::BinOp {
             left,
