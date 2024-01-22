@@ -23,24 +23,24 @@ pub struct Scanner<'a> {
 
 /// Scanner error type is used to report scanning errors to the user.
 #[derive(Debug, Clone)]
-pub struct ScannerError {
+pub struct ScanError {
     details: String,
     line: usize,
 }
 
-impl ScannerError {
+impl ScanError {
     const fn new(line: usize, details: String) -> Self {
         Self { details, line }
     }
 }
 
-impl fmt::Display for ScannerError {
+impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} at line {}.", self.details, self.line)
     }
 }
 
-impl Error for ScannerError {
+impl Error for ScanError {
     fn description(&self) -> &str {
         &self.details
     }
@@ -48,7 +48,8 @@ impl Error for ScannerError {
 
 impl Scanner<'_> {
     /// Creates a new lexer instance from a given `source` string.
-    #[must_use] pub fn new(source: &str) -> Scanner<'_> {
+    #[must_use]
+    pub fn new(source: &str) -> Scanner<'_> {
         Scanner {
             input: source,
             start: 0,
@@ -61,7 +62,7 @@ impl Scanner<'_> {
     /// Lex the passed source code and returns a list of tokens.
     /// # Errors
     /// Returns an error when it encounters an unknown token.
-    pub fn scan(&mut self) -> Result<Vec<Token>, ScannerError> {
+    pub fn scan(&mut self) -> Result<Vec<Token>, ScanError> {
         let mut tokens = Vec::new();
         while let Some(ch) = self.next() {
             // Grab the first lexeme as we will need to used it to scan
@@ -101,7 +102,7 @@ impl Scanner<'_> {
                 // Increment line number on newlines.
                 '\n' => self.line += 1,
                 _ => {
-                    return Err(ScannerError::new(
+                    return Err(ScanError::new(
                         self.line,
                         format!("Unrecognized token {ch}"),
                     ))

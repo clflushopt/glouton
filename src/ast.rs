@@ -117,14 +117,16 @@ impl Default for ExprPool {
 
 impl ExprPool {
     /// Create a new node pool with a pre-allocated capacity.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             nodes: Vec::with_capacity(4096),
         }
     }
 
     /// Return a reference to a node given its `NodeRef`.
-    #[must_use] pub fn get(&self, node_ref: ExprRef) -> Option<&Expr> {
+    #[must_use]
+    pub fn get(&self, node_ref: ExprRef) -> Option<&Expr> {
         self.nodes.get(node_ref.0)
     }
 
@@ -150,14 +152,16 @@ impl Default for StmtPool {
 
 impl StmtPool {
     /// Create a new node pool with a pre-allocated capacity.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             nodes: Vec::with_capacity(4096),
         }
     }
 
     /// Return a reference to a node given its `NodeRef`.
-    #[must_use] pub fn get(&self, node_ref: StmtRef) -> Option<&Stmt> {
+    #[must_use]
+    pub fn get(&self, node_ref: StmtRef) -> Option<&Stmt> {
         self.nodes.get(node_ref.0)
     }
 
@@ -229,7 +233,8 @@ pub enum DeclType {
 
 impl DeclType {
     /// Returns the default value for a declaration type.
-    #[must_use] pub fn default_value(&self) -> Expr {
+    #[must_use]
+    pub const fn default_value(&self) -> Expr {
         match self {
             Self::Int => Expr::IntLiteral(0),
             Self::Char => Expr::CharLiteral('\0'),
@@ -247,8 +252,6 @@ impl fmt::Display for DeclType {
         }
     }
 }
-
-/// Function arguments
 
 /// Expression nodes are used to represent expressions.
 /// TODO make Expr homogenous by storing `LiteralRef`, `StringRef` and so on
@@ -355,7 +358,8 @@ impl Default for AST {
 
 impl AST {
     /// Create a new empty AST.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             declarations: StmtPool::new(),
             statements: StmtPool::new(),
@@ -364,17 +368,20 @@ impl AST {
     }
 
     /// Return a non-mutable reference to the declaration pool.
-    #[must_use] pub fn declarations(&self) -> &Vec<Stmt> {
+    #[must_use]
+    pub const fn declarations(&self) -> &Vec<Stmt> {
         &self.declarations.nodes
     }
 
     /// Return a non-mutable reference to the statement pool.
-    #[must_use] pub fn statements(&self) -> &Vec<Stmt> {
+    #[must_use]
+    pub const fn statements(&self) -> &Vec<Stmt> {
         &self.statements.nodes
     }
 
     /// Return a non-mutable reference to the expression pool.
-    #[must_use] pub fn expressions(&self) -> &Vec<Expr> {
+    #[must_use]
+    pub const fn expressions(&self) -> &Vec<Expr> {
         &self.expressions.nodes
     }
 
@@ -395,19 +402,22 @@ impl AST {
 
     /// Fetches a declaration node by its reference, returning `None`
     /// if the declaration node deosn't exist.
-    #[must_use] pub fn get_decl(&self, decl_ref: StmtRef) -> Option<&Stmt> {
+    #[must_use]
+    pub fn get_decl(&self, decl_ref: StmtRef) -> Option<&Stmt> {
         self.declarations.get(decl_ref)
     }
 
     /// Fetches a statement node by its reference, returning `None`
     /// if the statement node deosn't exist.
-    #[must_use] pub fn get_stmt(&self, stmt_ref: StmtRef) -> Option<&Stmt> {
+    #[must_use]
+    pub fn get_stmt(&self, stmt_ref: StmtRef) -> Option<&Stmt> {
         self.statements.get(stmt_ref)
     }
 
     /// Fetches an expression node by its reference, returning `None`
     /// if the expression doesn't exist.
-    #[must_use] pub fn get_expr(&self, expr_ref: ExprRef) -> Option<&Expr> {
+    #[must_use]
+    pub fn get_expr(&self, expr_ref: ExprRef) -> Option<&Expr> {
         self.expressions.get(expr_ref)
     }
 }
@@ -418,7 +428,7 @@ struct ASTDisplayer<'a> {
 }
 
 impl<'a> ASTDisplayer<'a> {
-    pub fn new(ast: &'a AST) -> Self {
+    pub const fn new(ast: &'a AST) -> Self {
         Self { ast }
     }
 }
@@ -546,41 +556,37 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
     /// Visit a statement and return its textual representation.
     fn visit_stmt(&mut self, stmt: &Stmt) -> String {
         match stmt {
-            Stmt::Return(expr_ref) => {
-                if let Some(expr) = self.ast.get_expr(*expr_ref) {
-                    format!("Return({})", self.visit_expr(expr))
-                } else {
-                    unreachable!("Return statement is missing expression ref")
-                }
-            }
+            Stmt::Return(expr_ref) => self.ast.get_expr(*expr_ref).map_or_else(
+                || unreachable!("Return statement is missing expression ref"),
+                |expr| format!("Return({})", self.visit_expr(expr)),
+            ),
             Stmt::VarDecl {
                 decl_type,
                 name,
                 value,
             } => {
                 let mut s = format!("VAR({decl_type}, {name}");
-                if let Some(expr) = self.ast.get_expr(*value) {
-                    s += &format!(", {})", self.visit_expr(expr));
-                } else {
-                    unreachable!("Missing expression in assignment")
-                }
+                self.ast.get_expr(*value).map_or_else(
+                    || unreachable!("Missing expression in assignment"),
+                    |expr| {
+                        s += &format!(", {})", self.visit_expr(expr));
+                    },
+                );
                 s
             }
-            Stmt::Expr(expr_ref) => {
-                if let Some(expr) = self.ast.get_expr(*expr_ref) {
-                    format!("Expr({})", self.visit_expr(expr))
-                } else {
-                    unreachable!("Expr statement is missing expression ref")
-                }
-            }
+            Stmt::Expr(expr_ref) => self.ast.get_expr(*expr_ref).map_or_else(
+                || unreachable!("Expr statement is missing expression ref"),
+                |expr| format!("Expr({})", self.visit_expr(expr)),
+            ),
             Stmt::Block(stmts) => {
                 let mut s = "Block {\n".to_string();
                 for stmt_ref in stmts {
-                    if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
-                        s += &format!("Stmt({}),\n", self.visit_stmt(stmt)).to_string();
-                    } else {
-                        unreachable!("Block is missing statement ref")
-                    }
+                    self.ast.get_stmt(*stmt_ref).map_or_else(
+                        || unreachable!("Block is missing statement ref"),
+                        |stmt| {
+                            s += &format!("Stmt({}),\n", self.visit_stmt(stmt));
+                        },
+                    );
                 }
                 s += "}";
                 s
@@ -605,10 +611,10 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
 
                 args_str = args_str.trim_end_matches(", ").to_string();
 
-                let body = match self.ast.get_stmt(*body) {
-                    Some(body) => body,
-                    None => unreachable!("function is missing body"),
-                };
+                let body = self
+                    .ast
+                    .get_stmt(*body)
+                    .map_or_else(|| unreachable!("function is missing body"), |body| body);
                 format!(
                     "FUNCTION({}, {}, ARGS({}), {}",
                     name,
@@ -618,25 +624,22 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 )
             }
             Stmt::If(condition_ref, then_ref, else_ref) => {
-                let cond = if let Some(cond_expr) = self.ast.get_expr(*condition_ref) {
-                    self.visit_expr(cond_expr)
-                } else {
-                    unreachable!("missing condition for if statement")
-                };
+                let cond = self.ast.get_expr(*condition_ref).map_or_else(
+                    || unreachable!("missing condition for if statement"),
+                    |cond_expr| self.visit_expr(cond_expr),
+                );
 
-                let then_block = if let Some(body) = self.ast.get_stmt(*then_ref) {
-                    self.visit_stmt(body)
-                } else {
-                    String::new()
-                };
+                let then_block = self
+                    .ast
+                    .get_stmt(*then_ref)
+                    .map_or_else(String::new, |body| self.visit_stmt(body));
 
                 match else_ref {
                     Some(else_ref) => {
-                        let else_block = if let Some(else_block) = self.ast.get_stmt(*else_ref) {
-                            self.visit_stmt(else_block)
-                        } else {
-                            String::new()
-                        };
+                        let else_block = self
+                            .ast
+                            .get_stmt(*else_ref)
+                            .map_or_else(String::new, |else_block| self.visit_stmt(else_block));
                         format!("IF({cond}, {then_block}, {else_block})")
                     }
 

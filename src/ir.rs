@@ -110,13 +110,13 @@ pub enum Instruction {
 
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            &Self::Const {
+        match *self {
+            Self::Const {
                 dst,
                 const_type: _,
                 const_value,
             } => write!(f, "var_{dst}: int = const {const_value}"),
-            &Self::Add { lhs, rhs, dst } => write!(f, "var_{dst} = var_{lhs} + var_{rhs}"),
+            Self::Add { lhs, rhs, dst } => write!(f, "var_{dst} = var_{lhs} + var_{rhs}"),
             _ => todo!("Unimplemented display for instruction {}", self),
         }
     }
@@ -132,7 +132,8 @@ pub struct IRGenerator<'a> {
 }
 
 impl<'a> IRGenerator<'a> {
-    #[must_use] pub fn new(ast: &'a ast::AST) -> Self {
+    #[must_use]
+    pub const fn new(ast: &'a ast::AST) -> Self {
         Self {
             abstract_program: Vec::new(),
             ast,
@@ -140,38 +141,35 @@ impl<'a> IRGenerator<'a> {
         }
     }
 
-    fn program(&self) -> &Vec<Instruction> {
+    const fn program(&self) -> &Vec<Instruction> {
         &self.abstract_program
     }
 
     pub fn gen(&mut self) {
         for stmt in self.ast.declarations() {
             match stmt {
-                ast::Stmt::Return(expr_ref) => {
-                    if let Some(expr) = self.ast.get_expr(*expr_ref) {
+                ast::Stmt::Return(expr_ref) => self.ast.get_expr(*expr_ref).map_or_else(
+                    || unreachable!("Return statement is missing expression ref"),
+                    |expr| {
                         let _ = self.visit_expr(expr);
-                    } else {
-                        unreachable!("Return statement is missing expression ref")
-                    }
-                }
+                    },
+                ),
                 ast::Stmt::VarDecl {
                     decl_type: _,
                     name: _,
                     value,
-                } => {
-                    if let Some(expr) = self.ast.get_expr(*value) {
+                } => self.ast.get_expr(*value).map_or_else(
+                    || unreachable!("Variable declaration is missing assignmenet"),
+                    |expr| {
                         let _ = self.visit_expr(expr);
-                    } else {
-                        unreachable!("Variable declaration is missing assignmenet")
-                    }
-                }
-                ast::Stmt::Expr(expr_ref) => {
-                    if let Some(expr) = self.ast.get_expr(*expr_ref) {
+                    },
+                ),
+                ast::Stmt::Expr(expr_ref) => self.ast.get_expr(*expr_ref).map_or_else(
+                    || unreachable!("Expr statement is missing expression ref"),
+                    |expr| {
                         let _ = self.visit_expr(expr);
-                    } else {
-                        unreachable!("Expr statement is missing expression ref")
-                    }
-                }
+                    },
+                ),
                 _ => todo!("unimplemented ir gen phase for stmt {:?}", stmt),
             };
         }
@@ -183,8 +181,8 @@ impl<'a> ast::Visitor<u32> for IRGenerator<'a> {
         0
     }
     fn visit_expr(&mut self, expr: &ast::Expr) -> u32 {
-        match expr {
-            &ast::Expr::IntLiteral(value) => {
+        match *expr {
+            ast::Expr::IntLiteral(value) => {
                 self.var_count += 1;
                 self.abstract_program.push(Instruction::Const {
                     const_value: Literal::Int(value),
@@ -193,19 +191,18 @@ impl<'a> ast::Visitor<u32> for IRGenerator<'a> {
                 });
                 self.var_count
             }
-            &ast::Expr::UnaryOp { operator, operand } => {
+            ast::Expr::UnaryOp { operator, operand } => {
                 if let Some(operand) = self.ast.get_expr(operand) {
                     self.var_count += 1;
                     let _dst = self.visit_expr(operand);
                     match operator {
-                        ast::UnaryOperator::Neg => self.var_count,
-                        ast::UnaryOperator::Not => self.var_count,
+                        ast::UnaryOperator::Neg | ast::UnaryOperator::Not => self.var_count,
                     }
                 } else {
                     unreachable!("unary node is missing operand")
                 }
             }
-            &ast::Expr::BinOp {
+            ast::Expr::BinOp {
                 left,
                 operator,
                 right,
@@ -230,13 +227,10 @@ impl<'a> ast::Visitor<u32> for IRGenerator<'a> {
                     unreachable!("binary node is missing operand")
                 }
             }
-            &ast::Expr::Grouping(expr_ref) => {
-                if let Some(expr) = self.ast.get_expr(expr_ref) {
-                    self.visit_expr(expr)
-                } else {
-                    unreachable!("unary node is missing operand")
-                }
-            }
+            ast::Expr::Grouping(expr_ref) => self.ast.get_expr(expr_ref).map_or_else(
+                || unreachable!("unary node is missing operand"),
+                |expr| self.visit_expr(expr),
+            ),
             _ => todo!("Unimplemented display for Node {:?}", expr),
         }
     }

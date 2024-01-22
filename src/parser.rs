@@ -66,7 +66,8 @@ pub struct Parser {
 
 impl Parser {
     /// Returns a new `Parser` instance by creating an owned version `tokens`.
-    #[must_use] pub fn new(tokens: &[Token]) -> Self {
+    #[must_use]
+    pub fn new(tokens: &[Token]) -> Self {
         Self {
             tokens: tokens.to_owned(),
             cursor: 0usize,
@@ -75,7 +76,8 @@ impl Parser {
     }
 
     /// Return a reference to the constructed AST.
-    #[must_use] pub fn ast(&self) -> &AST {
+    #[must_use]
+    pub const fn ast(&self) -> &AST {
         &self.ast
     }
 
@@ -97,10 +99,10 @@ impl Parser {
 
     /// Parse a statement.
     fn statement(&mut self) -> Stmt {
-        match self.peek() {
-            &Token::Return => self.return_stmt(),
-            &Token::LBrace => self.block(),
-            &Token::If => self.if_stmt(),
+        match *self.peek() {
+            Token::Return => self.return_stmt(),
+            Token::LBrace => self.block(),
+            Token::If => self.if_stmt(),
             _ => self.expr_stmt(),
         }
     }
@@ -112,10 +114,10 @@ impl Parser {
             return self.statement();
         }
 
-        let decl_type = match self.consume() {
-            &Token::Int => DeclType::Int,
-            &Token::Char => DeclType::Char,
-            &Token::Bool => DeclType::Bool,
+        let decl_type = match *self.consume() {
+            Token::Int => DeclType::Int,
+            Token::Char => DeclType::Char,
+            Token::Bool => DeclType::Bool,
             _ => unreachable!("Expected declaration type to be one of (int, char, bool)."),
         };
         let identifier = match self.consume() {
@@ -123,9 +125,9 @@ impl Parser {
             _ => unreachable!("Expected identifier, found {}", self.peek()),
         };
 
-        match self.peek() {
+        match *self.peek() {
             // Variable declaration without right value assignment.
-            &Token::SemiColon => {
+            Token::SemiColon => {
                 self.eat(&Token::SemiColon);
                 let assigned = decl_type.default_value();
                 let assigned_ref = self.ast.push_expr(assigned);
@@ -137,7 +139,7 @@ impl Parser {
                 }
             }
             // Variable declaration with right value assignment.
-            &Token::Equal => {
+            Token::Equal => {
                 let assigned = self.expression();
                 self.eat(&Token::SemiColon);
                 Stmt::VarDecl {
@@ -147,7 +149,7 @@ impl Parser {
                 }
             }
             // Function declaration.
-            &Token::LParen => {
+            Token::LParen => {
                 // Function declaration.
                 self.eat(&Token::LParen);
                 // Arguments
@@ -178,10 +180,10 @@ impl Parser {
         let mut args = vec![];
         if !self.check(&Token::RParen) {
             loop {
-                let arg_type = match self.consume() {
-                    &Token::Int => DeclType::Int,
-                    &Token::Char => DeclType::Char,
-                    &Token::Bool => DeclType::Bool,
+                let arg_type = match *self.consume() {
+                    Token::Int => DeclType::Int,
+                    Token::Char => DeclType::Char,
+                    Token::Bool => DeclType::Bool,
                     _ => unreachable!("expected type declaration found {}", self.peek()),
                 };
 
@@ -284,7 +286,7 @@ impl Parser {
             _ => todo!("Unexpected prefix token {}", self.prev()),
         };
 
-        while prec < self.tok_precedence(self.peek()) {
+        while prec < Self::get_token_precedence(self.peek()) {
             let infix_ref = match self.consume() {
                 // Arithmetic expressions.
                 &Token::Plus | &Token::Minus | &Token::Star | &Token::Slash => {
@@ -310,18 +312,18 @@ impl Parser {
 
     /// Parse a comparison expression.
     fn comparison(&mut self, left: ExprRef) -> ExprRef {
-        let operator = match self.prev() {
-            &Token::Lesser => BinaryOperator::Lt,
-            &Token::LesserEqual => BinaryOperator::Lte,
-            &Token::Greater => BinaryOperator::Gt,
-            &Token::GreaterEqual => BinaryOperator::Gte,
-            &Token::EqualEqual => BinaryOperator::Eq,
-            &Token::BangEqual => BinaryOperator::Neq,
+        let operator = match *self.prev() {
+            Token::Lesser => BinaryOperator::Lt,
+            Token::LesserEqual => BinaryOperator::Lte,
+            Token::Greater => BinaryOperator::Gt,
+            Token::GreaterEqual => BinaryOperator::Gte,
+            Token::EqualEqual => BinaryOperator::Eq,
+            Token::BangEqual => BinaryOperator::Neq,
             // There is no infix operator.
             _ => unreachable!("Unknown token in binary expression {}", self.peek()),
         };
 
-        let precedence = (self.tok_precedence(self.prev()) as u8 + 1).into();
+        let precedence = (Self::get_token_precedence(self.prev()) as u8 + 1).into();
         let right = self.precedence(precedence);
         self.ast.push_expr(Expr::BinOp {
             left,
@@ -332,15 +334,15 @@ impl Parser {
 
     /// Parse a binary expression.
     fn binary(&mut self, left: ExprRef) -> ExprRef {
-        let operator = match self.prev() {
-            &Token::Plus => BinaryOperator::Add,
-            &Token::Minus => BinaryOperator::Sub,
-            &Token::Star => BinaryOperator::Mul,
-            &Token::Slash => BinaryOperator::Div,
+        let operator = match *self.prev() {
+            Token::Plus => BinaryOperator::Add,
+            Token::Minus => BinaryOperator::Sub,
+            Token::Star => BinaryOperator::Mul,
+            Token::Slash => BinaryOperator::Div,
             // There is no infix operator.
             _ => unreachable!("Unknown token in binary expression {}", self.peek()),
         };
-        let precedence = self.tok_precedence(self.prev());
+        let precedence = Self::get_token_precedence(self.prev());
         let right = self.precedence(precedence);
         self.ast.push_expr(Expr::BinOp {
             left,
@@ -362,9 +364,9 @@ impl Parser {
     /// Parse a unary expression.
     fn unary(&mut self) -> ExprRef {
         // Grab the operator.
-        let operator = match self.prev() {
-            &Token::Minus => UnaryOperator::Neg,
-            &Token::Bang => UnaryOperator::Not,
+        let operator = match *self.prev() {
+            Token::Minus => UnaryOperator::Neg,
+            Token::Bang => UnaryOperator::Not,
             _ => unreachable!("Unexpected unary operator {}", self.prev()),
         };
 
@@ -432,24 +434,20 @@ impl Parser {
     }
 
     /// Return a token's precedence.
-    fn tok_precedence(&self, token: &Token) -> Precedence {
-        match token {
-            &Token::Minus => Precedence::Term,
-            &Token::Plus => Precedence::Term,
-            &Token::Slash => Precedence::Factor,
-            &Token::Star => Precedence::Factor,
-            &Token::Or => Precedence::Or,
-            &Token::And => Precedence::And,
-            &Token::EqualEqual => Precedence::Equal,
-            &Token::BangEqual => Precedence::Equal,
-            &Token::Greater => Precedence::Comparison,
-            &Token::GreaterEqual => Precedence::Comparison,
-            &Token::Lesser => Precedence::Comparison,
-            &Token::LesserEqual => Precedence::Comparison,
+    const fn get_token_precedence(token: &Token) -> Precedence {
+        match *token {
+            Token::Plus | Token::Minus => Precedence::Term,
+            Token::Star | Token::Slash => Precedence::Factor,
+            Token::Or => Precedence::Or,
+            Token::And => Precedence::And,
+            Token::EqualEqual | Token::BangEqual => Precedence::Equal,
+            Token::Greater | Token::GreaterEqual | Token::Lesser | Token::LesserEqual => {
+                Precedence::Comparison
+            }
             // Assignment.
-            &Token::Equal => Precedence::Assignment,
+            Token::Equal => Precedence::Assignment,
             // Call.
-            &Token::LParen => Precedence::Call,
+            Token::LParen => Precedence::Call,
             _ => Precedence::None,
         }
     }
