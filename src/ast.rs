@@ -177,16 +177,16 @@ pub enum BinaryOperator {
 impl fmt::Display for BinaryOperator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BinaryOperator::Add => write!(f, "ADD"),
-            BinaryOperator::Sub => write!(f, "SUB"),
-            BinaryOperator::Mul => write!(f, "MUL"),
-            BinaryOperator::Div => write!(f, "DIV"),
-            BinaryOperator::Eq => write!(f, "EQU"),
-            BinaryOperator::Neq => write!(f, "NEQ"),
-            BinaryOperator::Gt => write!(f, "GT"),
-            BinaryOperator::Gte => write!(f, "GTE"),
-            BinaryOperator::Lt => write!(f, "LT"),
-            BinaryOperator::Lte => write!(f, "LTE"),
+            Self::Add => write!(f, "ADD"),
+            Self::Sub => write!(f, "SUB"),
+            Self::Mul => write!(f, "MUL"),
+            Self::Div => write!(f, "DIV"),
+            Self::Eq => write!(f, "EQU"),
+            Self::Neq => write!(f, "NEQ"),
+            Self::Gt => write!(f, "GT"),
+            Self::Gte => write!(f, "GTE"),
+            Self::Lt => write!(f, "LT"),
+            Self::Lte => write!(f, "LTE"),
         }
     }
 }
@@ -201,8 +201,8 @@ pub enum UnaryOperator {
 impl fmt::Display for UnaryOperator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            UnaryOperator::Neg => write!(f, "NEG"),
-            UnaryOperator::Not => write!(f, "NOT"),
+            Self::Neg => write!(f, "NEG"),
+            Self::Not => write!(f, "NOT"),
         }
     }
 }
@@ -229,9 +229,9 @@ impl DeclType {
 impl fmt::Display for DeclType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DeclType::Int => write!(f, "INT_TYPE"),
-            DeclType::Char => write!(f, "CHAR_TYPE"),
-            DeclType::Bool => write!(f, "BOOL_TYPE"),
+            Self::Int => write!(f, "INT_TYPE"),
+            Self::Char => write!(f, "CHAR_TYPE"),
+            Self::Bool => write!(f, "BOOL_TYPE"),
         }
     }
 }
