@@ -50,7 +50,7 @@ impl From<u8> for Precedence {
 
 impl From<Precedence> for u8 {
     fn from(prec: Precedence) -> Self {
-        prec as u8
+        prec as Self
     }
 }
 
@@ -66,7 +66,7 @@ pub struct Parser {
 
 impl Parser {
     /// Returns a new `Parser` instance by creating an owned version `tokens`.
-    pub fn new(tokens: &[Token]) -> Self {
+    #[must_use] pub fn new(tokens: &[Token]) -> Self {
         Self {
             tokens: tokens.to_owned(),
             cursor: 0usize,
@@ -75,7 +75,7 @@ impl Parser {
     }
 
     /// Return a reference to the constructed AST.
-    pub fn ast(&self) -> &AST {
+    #[must_use] pub fn ast(&self) -> &AST {
         &self.ast
     }
 

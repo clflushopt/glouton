@@ -132,7 +132,7 @@ pub struct IRGenerator<'a> {
 }
 
 impl<'a> IRGenerator<'a> {
-    pub fn new(ast: &'a ast::AST) -> Self {
+    #[must_use] pub fn new(ast: &'a ast::AST) -> Self {
         Self {
             abstract_program: Vec::new(),
             ast,

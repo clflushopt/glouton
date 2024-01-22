@@ -85,7 +85,7 @@
 //! either represents a variable or function declaration followed by statements
 //!
 //!
-//! This approach is not new and has been used in LuaJIT, Zig, Sorbet, ECS
+//! This approach is not new and has been used in `LuaJIT`, Zig, Sorbet, ECS
 //! game engines and more, see [1] for more details.
 //!
 //! [1]: https://www.cs.cornell.edu/~asampson/blog/flattening.html
@@ -117,14 +117,14 @@ impl Default for ExprPool {
 
 impl ExprPool {
     /// Create a new node pool with a pre-allocated capacity.
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self {
             nodes: Vec::with_capacity(4096),
         }
     }
 
     /// Return a reference to a node given its `NodeRef`.
-    pub fn get(&self, node_ref: ExprRef) -> Option<&Expr> {
+    #[must_use] pub fn get(&self, node_ref: ExprRef) -> Option<&Expr> {
         self.nodes.get(node_ref.0)
     }
 
@@ -150,14 +150,14 @@ impl Default for StmtPool {
 
 impl StmtPool {
     /// Create a new node pool with a pre-allocated capacity.
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self {
             nodes: Vec::with_capacity(4096),
         }
     }
 
     /// Return a reference to a node given its `NodeRef`.
-    pub fn get(&self, node_ref: StmtRef) -> Option<&Stmt> {
+    #[must_use] pub fn get(&self, node_ref: StmtRef) -> Option<&Stmt> {
         self.nodes.get(node_ref.0)
     }
 
@@ -229,7 +229,7 @@ pub enum DeclType {
 
 impl DeclType {
     /// Returns the default value for a declaration type.
-    pub fn default_value(&self) -> Expr {
+    #[must_use] pub fn default_value(&self) -> Expr {
         match self {
             Self::Int => Expr::IntLiteral(0),
             Self::Char => Expr::CharLiteral('\0'),
@@ -355,7 +355,7 @@ impl Default for AST {
 
 impl AST {
     /// Create a new empty AST.
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self {
             declarations: StmtPool::new(),
             statements: StmtPool::new(),
@@ -364,17 +364,17 @@ impl AST {
     }
 
     /// Return a non-mutable reference to the declaration pool.
-    pub fn declarations(&self) -> &Vec<Stmt> {
+    #[must_use] pub fn declarations(&self) -> &Vec<Stmt> {
         &self.declarations.nodes
     }
 
     /// Return a non-mutable reference to the statement pool.
-    pub fn statements(&self) -> &Vec<Stmt> {
+    #[must_use] pub fn statements(&self) -> &Vec<Stmt> {
         &self.statements.nodes
     }
 
     /// Return a non-mutable reference to the expression pool.
-    pub fn expressions(&self) -> &Vec<Expr> {
+    #[must_use] pub fn expressions(&self) -> &Vec<Expr> {
         &self.expressions.nodes
     }
 
@@ -395,19 +395,19 @@ impl AST {
 
     /// Fetches a declaration node by its reference, returning `None`
     /// if the declaration node deosn't exist.
-    pub fn get_decl(&self, decl_ref: StmtRef) -> Option<&Stmt> {
+    #[must_use] pub fn get_decl(&self, decl_ref: StmtRef) -> Option<&Stmt> {
         self.declarations.get(decl_ref)
     }
 
     /// Fetches a statement node by its reference, returning `None`
     /// if the statement node deosn't exist.
-    pub fn get_stmt(&self, stmt_ref: StmtRef) -> Option<&Stmt> {
+    #[must_use] pub fn get_stmt(&self, stmt_ref: StmtRef) -> Option<&Stmt> {
         self.statements.get(stmt_ref)
     }
 
     /// Fetches an expression node by its reference, returning `None`
     /// if the expression doesn't exist.
-    pub fn get_expr(&self, expr_ref: ExprRef) -> Option<&Expr> {
+    #[must_use] pub fn get_expr(&self, expr_ref: ExprRef) -> Option<&Expr> {
         self.expressions.get(expr_ref)
     }
 }
@@ -528,7 +528,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                         match self.ast.get_expr(*arg) {
                             Some(arg) => {
                                 let formatted_arg = self.visit_expr(arg);
-                                call_str += &format!("{}, ", formatted_arg);
+                                call_str += &format!("{formatted_arg}, ");
                             }
                             _ => (),
                         }
@@ -558,9 +558,9 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 name,
                 value,
             } => {
-                let mut s = format!("VAR({}, {}", decl_type, name);
+                let mut s = format!("VAR({decl_type}, {name}");
                 if let Some(expr) = self.ast.get_expr(*value) {
-                    s += &format!(", {})", self.visit_expr(expr)).to_string();
+                    s += &format!(", {})", self.visit_expr(expr));
                 } else {
                     unreachable!("Missing expression in assignment")
                 }
@@ -586,7 +586,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 s
             }
             Stmt::FuncArg { decl_type, name } => {
-                format!("ARG({}, {})", decl_type, name)
+                format!("ARG({decl_type}, {name})")
             }
             Stmt::FuncDecl {
                 name,
@@ -594,7 +594,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 args,
                 body,
             } => {
-                let mut args_str = "".to_owned();
+                let mut args_str = String::new();
                 for arg in args {
                     if let Some(arg) = self.ast.get_stmt(*arg) {
                         let arg_str = self.visit_stmt(arg);
@@ -619,28 +619,28 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
             }
             Stmt::If(condition_ref, then_ref, else_ref) => {
                 let cond = if let Some(cond_expr) = self.ast.get_expr(*condition_ref) {
-                    self.visit_expr(cond_expr).to_string()
+                    self.visit_expr(cond_expr)
                 } else {
                     unreachable!("missing condition for if statement")
                 };
 
                 let then_block = if let Some(body) = self.ast.get_stmt(*then_ref) {
-                    self.visit_stmt(body).to_string()
+                    self.visit_stmt(body)
                 } else {
-                    "".to_string()
+                    String::new()
                 };
 
                 match else_ref {
                     Some(else_ref) => {
                         let else_block = if let Some(else_block) = self.ast.get_stmt(*else_ref) {
-                            self.visit_stmt(else_block).to_string()
+                            self.visit_stmt(else_block)
                         } else {
-                            "".to_string()
+                            String::new()
                         };
-                        format!("IF({}, {}, {})", cond, then_block, else_block)
+                        format!("IF({cond}, {then_block}, {else_block})")
                     }
 
-                    None => format!("IF({}, {})", cond, then_block),
+                    None => format!("IF({cond}, {then_block})"),
                 }
             }
             Stmt::Empty => unreachable!(
