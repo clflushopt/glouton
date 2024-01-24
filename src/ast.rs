@@ -92,86 +92,102 @@
 
 use core::fmt;
 
-/// Node references are represented as `usize` handles to the AST arena
-/// this avoides type casting everytime we want to access a node and down
-/// casting when building references from indices.
+/// Node references are represented as `usize` handles to the AST arena entries
+/// if space is a concern smaller handles can be used `u32` for example if you
+/// assume at most 4 billion nodes per node kind.
 ///
-/// `StmtRef` is used to reference statements.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StmtRef(usize);
-/// `ExprRef` is used to reference expressions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ExprRef(usize);
-
-/// `ExprPool` represents an arena of AST expression nodes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExprPool {
-    nodes: Vec<Expr>,
+/// `Ref` trait allows us to restrict which types can be used as handles
+/// or node references.
+pub trait Ref {
+    fn new(reference: usize) -> Self;
+    fn get(&self) -> usize;
 }
 
-impl Default for ExprPool {
-    fn default() -> Self {
-        Self::new()
+/// `NodeRef` is a reference to an AST node, its a generic handle that wraps
+/// a `usize` which in itself is an index into a `Vec` of AST nodes.
+///
+/// Since our pool is generic over either `Expr` or `Stmt` and we want to have
+/// one reference kind of each, `NodeRef` acts as a phantom type that will be
+/// later marked to reference either expressions or statements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NodeRef<T> {
+    inner: usize,
+    _marker: std::marker::PhantomData<T>,
+}
+
+/// Implement the `Ref` trait for our `NodeRef` type.
+impl<T> Ref for NodeRef<T> {
+    fn new(inner: usize) -> Self {
+        Self {
+            inner,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn get(&self) -> usize {
+        self.inner
     }
 }
 
-impl ExprPool {
-    /// Create a new node pool with a pre-allocated capacity.
+/// `NodePool` represents a pool of AST nodes, each node pool is restricted
+/// to an implementation of the `Ref` trait. This allows us to have compile
+/// time type safe references for either expressions or statements.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodePool<T, R: Ref> {
+    nodes: Vec<T>,
+    _marker: std::marker::PhantomData<R>,
+}
+
+/// Implementation of the `NodePool` exposes a `get` function to fetch an AST
+/// node by its reference and an `add` function that appends a new AST node
+/// to the pool.
+impl<T, R: Ref> NodePool<T, R> {
     #[must_use]
     pub fn new() -> Self {
         Self {
             nodes: Vec::with_capacity(4096),
+            _marker: std::marker::PhantomData,
         }
     }
 
     /// Return a reference to a node given its `NodeRef`.
     #[must_use]
-    pub fn get(&self, node_ref: ExprRef) -> Option<&Expr> {
-        self.nodes.get(node_ref.0)
+    pub fn get(&self, node_ref: R) -> Option<&T> {
+        self.nodes.get(node_ref.get())
     }
 
     /// Push a new expression into the pool.
-    fn add(&mut self, expr: Expr) -> ExprRef {
+    fn add(&mut self, expr: T) -> R {
         let node_ref = self.nodes.len();
         self.nodes.push(expr);
-        ExprRef(node_ref)
+        R::new(node_ref)
     }
 }
 
-/// `StmtPool` represents an arena of AST statement nodes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StmtPool {
-    nodes: Vec<Stmt>,
-}
-
-impl Default for StmtPool {
+impl<T, R: Ref> Default for NodePool<T, R> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl StmtPool {
-    /// Create a new node pool with a pre-allocated capacity.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            nodes: Vec::with_capacity(4096),
-        }
-    }
+/// `ExprRefMarker` is a phantom type marker for node references that reference
+/// expressions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExprRefMarker;
+/// `StmtRefMarker` is a phantom type marker for node references that reference
+/// statements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StmtRefMarker;
 
-    /// Return a reference to a node given its `NodeRef`.
-    #[must_use]
-    pub fn get(&self, node_ref: StmtRef) -> Option<&Stmt> {
-        self.nodes.get(node_ref.0)
-    }
+/// `ExprRef` is a reference to an `Expr` node in the expression pool.
+pub type ExprRef = NodeRef<ExprRefMarker>;
+/// `StmtRef` is a reference to a `Stmt` node in the statements pool.
+pub type StmtRef = NodeRef<StmtRefMarker>;
 
-    /// Push a new expression into the pool.
-    fn add(&mut self, stmt: Stmt) -> StmtRef {
-        let node_ref = self.nodes.len();
-        self.nodes.push(stmt);
-        StmtRef(node_ref)
-    }
-}
+/// `ExprPool` is a node pool that holds `Expr` nodes.
+type ExprPool = NodePool<Expr, ExprRef>;
+/// `StmtPool` is a node pool that holds `Stmt` nodes.
+type StmtPool = NodePool<Stmt, StmtRef>;
 
 /// Binary operators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -343,10 +359,10 @@ pub trait Visitor<T> {
 impl fmt::Display for AST {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut displayer = ASTDisplayer::new(self);
-        for stmt in &self.declarations.nodes {
-            write!(f, "{}", displayer.visit_stmt(stmt))?;
-        }
-        Ok(())
+        self.declarations()
+            .iter()
+            .map(|decl| write!(f, "{}", displayer.visit_stmt(decl)))
+            .collect()
     }
 }
 
@@ -528,12 +544,12 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
             } => {
                 if let Some(name) = self.ast.get_expr(*name_ref) {
                     let mut call_str = format!("Call({}, Args(", self.visit_expr(name));
-                    for arg in args {
-                        if let Some(arg) = self.ast.get_expr(*arg) {
+                    args.iter().for_each(|arg_ref| {
+                        if let Some(arg) = self.ast.get_expr(*arg_ref) {
                             let formatted_arg = self.visit_expr(arg);
                             call_str += &format!("{formatted_arg}, ");
                         }
-                    }
+                    });
                     call_str = call_str.trim_end_matches(", ").to_string();
                     call_str += "))";
                     call_str
@@ -571,14 +587,14 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
             ),
             Stmt::Block(stmts) => {
                 let mut s = "Block {\n".to_string();
-                for stmt_ref in stmts {
+                stmts.iter().for_each(|stmt_ref| {
                     self.ast.get_stmt(*stmt_ref).map_or_else(
-                        || unreachable!("Block is missing statement ref"),
+                        || unreachable!("Block is missing statement reference"),
                         |stmt| {
                             s += &format!("Stmt({}),\n", self.visit_stmt(stmt));
                         },
-                    );
-                }
+                    )
+                });
                 s += "}";
                 s
             }
@@ -592,13 +608,13 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 body,
             } => {
                 let mut args_str = String::new();
-                for arg in args {
-                    if let Some(arg) = self.ast.get_stmt(*arg) {
+                args.iter().for_each(|arg_ref| {
+                    if let Some(arg) = self.ast.get_stmt(*arg_ref) {
                         let arg = self.visit_stmt(arg);
                         args_str += &arg;
                         args_str += ", ";
                     }
-                }
+                });
 
                 args_str = args_str.trim_end_matches(", ").to_string();
 
