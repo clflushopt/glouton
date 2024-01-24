@@ -509,7 +509,6 @@ mod tests {
                 let tokens = scanner.scan().unwrap();
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
-                let ast = parser.ast();
                 assert_eq!(parser.ast().to_string(), $expected);
             }
         };

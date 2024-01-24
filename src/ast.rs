@@ -439,16 +439,13 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
         match expr {
             &Expr::IntLiteral(value) => value.to_string(),
             &Expr::BoolLiteral(value) => value.to_string(),
-            &Expr::UnaryOp { operator, operand } => {
-                if let Some(operand) = self.ast.get_expr(operand) {
-                    match operator {
-                        UnaryOperator::Neg => format!("Neg({})", self.visit_expr(operand)),
-                        UnaryOperator::Not => format!("Not({})", self.visit_expr(operand)),
-                    }
-                } else {
-                    unreachable!("unary node is missing operand")
-                }
-            }
+            &Expr::UnaryOp { operator, operand } => self.ast.get_expr(operand).map_or_else(
+                || unreachable!("unary node is missing operand"),
+                |operand| match operator {
+                    UnaryOperator::Neg => format!("Neg({})", self.visit_expr(operand)),
+                    UnaryOperator::Not => format!("Not({})", self.visit_expr(operand)),
+                },
+            ),
             &Expr::BinOp {
                 left,
                 operator,
@@ -517,13 +514,10 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                     unreachable!("binary node is missing operand")
                 }
             }
-            &Expr::Grouping(expr_ref) => {
-                if let Some(expr) = self.ast.get_expr(expr_ref) {
-                    format!("Grouping({})", self.visit_expr(expr))
-                } else {
-                    unreachable!("unary node is missing operand")
-                }
-            }
+            &Expr::Grouping(expr_ref) => self.ast.get_expr(expr_ref).map_or_else(
+                || unreachable!("unary node is missing operand"),
+                |expr| format!("Grouping({})", self.visit_expr(expr)),
+            ),
             Expr::Named(name) => {
                 let name = name.clone();
                 format!("Named({name})")
@@ -535,12 +529,9 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 if let Some(name) = self.ast.get_expr(*name_ref) {
                     let mut call_str = format!("Call({}, Args(", self.visit_expr(name));
                     for arg in args {
-                        match self.ast.get_expr(*arg) {
-                            Some(arg) => {
-                                let formatted_arg = self.visit_expr(arg);
-                                call_str += &format!("{formatted_arg}, ");
-                            }
-                            _ => (),
+                        if let Some(arg) = self.ast.get_expr(*arg) {
+                            let formatted_arg = self.visit_expr(arg);
+                            call_str += &format!("{formatted_arg}, ");
                         }
                     }
                     call_str = call_str.trim_end_matches(", ").to_string();
@@ -603,8 +594,8 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 let mut args_str = String::new();
                 for arg in args {
                     if let Some(arg) = self.ast.get_stmt(*arg) {
-                        let arg_str = self.visit_stmt(arg);
-                        args_str += &arg_str;
+                        let arg = self.visit_stmt(arg);
+                        args_str += &arg;
                         args_str += ", ";
                     }
                 }
