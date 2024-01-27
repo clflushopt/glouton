@@ -6,11 +6,12 @@
 //! value operations which take operands and produce values and effect based
 //! operations which take operands and produce no values.
 use core::fmt;
+use std::fmt::Display;
 
 use crate::ast::{self, Visitor};
 
 /// Types used in the IR.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Type {
     // Integers, defaults to i32.
     Int,
@@ -82,7 +83,9 @@ pub enum Instruction {
         const_type: Type,
         const_value: Literal,
     },
-    // Arithmetic instructions are value operations.
+    // Value operations.
+    //
+    // Arithmetic instructions.
     Add {
         lhs: u32,
         rhs: u32,
@@ -106,6 +109,11 @@ pub enum Instruction {
     // Return instruction is an effect operation that transfers execution
     // back to the caller.
     Ret,
+    // Label is a special instruction that acts as a marker.
+    Label {
+        // Label name.
+        label: String,
+    },
 }
 
 impl fmt::Display for Instruction {
@@ -122,11 +130,72 @@ impl fmt::Display for Instruction {
     }
 }
 
+/// `Argument` is a wrapper around a name and type it represents a single
+/// function argument.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Argument {
+    // Argument name.
+    name: String,
+    // Argument type.
+    kind: Type,
+}
+
+impl fmt::Display for Argument {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.name, self.kind)
+    }
+}
+
+/// `Function` represents a function declaration in the AST, a `Function`
+/// is composed as a linear sequence of GIR instructions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Function {
+    // Function name.
+    name: String,
+    // List of arguments the function accepts.
+    args: Vec<Argument>,
+    // Body of the function as GIR instructions.
+    body: Vec<Instruction>,
+    // Return type of the function if any.
+    return_type: Option<Type>,
+}
+
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "@{}", self.name)?;
+
+        if !self.args.is_empty() {
+            write!(f, "(")?;
+
+            for (i, arg) in self.args.iter().enumerate() {
+                if i != 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{arg}")?;
+            }
+            write!(f, ")")?;
+        }
+
+        if let Some(return_type) = self.return_type {
+            write!(f, ": {return_type}")?;
+        }
+
+        writeln!(f, " {{")?;
+
+        for inst in &self.body {
+            writeln!(f, "{inst}")?;
+        }
+        write!(f, "}}")
+    }
+}
+
 /// `IRGenerator` generates an intermediate representation by walking the AST
-/// and building an `AbstractProgram` which is an abstract representation of
-/// the entire program.
+/// and building a intermediate representation of the original program.
+///
+/// The result of the process is a `Vec` of IR generated functions and a global
+/// scope used to hold global variable declarations.
 pub struct IRGenerator<'a> {
-    abstract_program: Vec<Instruction>,
+    program: Vec<Function>,
     ast: &'a ast::AST,
     var_count: u32,
 }
@@ -135,15 +204,19 @@ impl<'a> IRGenerator<'a> {
     #[must_use]
     pub const fn new(ast: &'a ast::AST) -> Self {
         Self {
-            abstract_program: Vec::new(),
+            program: Vec::new(),
             ast,
             var_count: 0u32,
         }
     }
 
-    const fn program(&self) -> &Vec<Instruction> {
-        &self.abstract_program
+    /// Returns a non-mutable reference to the generated program.
+    const fn program(&self) -> &Vec<Function> {
+        &self.program
     }
+
+    /// Emit a constant operation.
+    fn emit_const_op() {}
 
     pub fn gen(&mut self) {
         for stmt in self.ast.declarations() {
@@ -177,61 +250,14 @@ impl<'a> IRGenerator<'a> {
 }
 
 impl<'a> ast::Visitor<u32> for IRGenerator<'a> {
-    fn visit_stmt(&mut self, _stmt: &ast::Stmt) -> u32 {
-        0
+    fn visit_stmt(&mut self, stmt: &ast::Stmt) -> u32 {
+        match *stmt {
+            _ => todo!("Unimplemented visitor for Node {:?}", stmt),
+        }
     }
     fn visit_expr(&mut self, expr: &ast::Expr) -> u32 {
         match *expr {
-            ast::Expr::IntLiteral(value) => {
-                self.var_count += 1;
-                self.abstract_program.push(Instruction::Const {
-                    const_value: Literal::Int(value),
-                    const_type: Type::Int,
-                    dst: self.var_count,
-                });
-                self.var_count
-            }
-            ast::Expr::UnaryOp { operator, operand } => {
-                if let Some(operand) = self.ast.get_expr(operand) {
-                    self.var_count += 1;
-                    let _dst = self.visit_expr(operand);
-                    match operator {
-                        ast::UnaryOperator::Neg | ast::UnaryOperator::Not => self.var_count,
-                    }
-                } else {
-                    unreachable!("unary node is missing operand")
-                }
-            }
-            ast::Expr::BinOp {
-                left,
-                operator,
-                right,
-            } => {
-                if let (Some(left), Some(right)) =
-                    (self.ast.get_expr(left), self.ast.get_expr(right))
-                {
-                    match operator {
-                        ast::BinaryOperator::Add => {
-                            self.var_count += 1;
-                            let lhs = self.visit_expr(left);
-                            self.var_count += 1;
-                            let rhs = self.visit_expr(right);
-                            let dst = self.var_count;
-                            self.abstract_program
-                                .push(Instruction::Add { lhs, rhs, dst });
-                            dst
-                        }
-                        _ => todo!("Unimplemented IR generation for operator {operator}"),
-                    }
-                } else {
-                    unreachable!("binary node is missing operand")
-                }
-            }
-            ast::Expr::Grouping(expr_ref) => self.ast.get_expr(expr_ref).map_or_else(
-                || unreachable!("unary node is missing operand"),
-                |expr| self.visit_expr(expr),
-            ),
-            _ => todo!("Unimplemented display for Node {:?}", expr),
+            _ => todo!("Unimplemented visitor for Node {:?}", expr),
         }
     }
 }
@@ -262,6 +288,7 @@ mod tests {
             }
         };
     }
+
     test_ir_gen!(
         can_parse_return_statements,
         "return 1 + 2 + 3 + 4;",
