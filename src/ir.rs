@@ -269,22 +269,65 @@ impl Instruction {
         }
     }
 
-    /// Emit a call instruction.
-    fn emit_call(func: String, args: Vec<String>) -> Instruction {
-        let mut call_args = vec![func];
-        call_args.extend(args);
-
-        Instruction::Effect {
-            args: call_args,
-            op: EffectOp::Call,
-        }
-    }
-
     /// Emit a return instruction.
     fn emit_ret(value: String) -> Instruction {
         Instruction::Effect {
             args: vec![value],
             op: EffectOp::Return,
+        }
+    }
+
+    /// Emith an arithmetic operation.
+    fn emit_arith(dst: String, op_type: Type, op: ValueOp, args: Vec<String>) -> Instruction {
+        Instruction::Value {
+            args,
+            dst,
+            op,
+            op_type,
+        }
+    }
+
+    /// Emit a comparison operation.
+    fn emit_cmp(dst: String, op_type: Type, op: ValueOp, args: Vec<String>) -> Instruction {
+        Instruction::Value {
+            args,
+            dst,
+            op,
+            op_type,
+        }
+    }
+
+    /// Emit a boolean operation.
+    fn emit_bool(dst: String, op_type: Type, op: ValueOp, args: Vec<String>) -> Instruction {
+        Instruction::Value {
+            args,
+            dst,
+            op,
+            op_type,
+        }
+    }
+
+    /// Emit an identity operation.
+    fn emit_ident(dst: String, op_type: Type, args: Vec<String>) -> Instruction {
+        Instruction::Value {
+            args,
+            dst,
+            op: ValueOp::Id,
+            op_type,
+        }
+    }
+
+    /// Emit a call operation.
+    fn emit_call(dst: String, op_type: Type, name: String, mut args: Vec<String>) -> Instruction {
+        // Name is the first argument.
+        let mut func_args = vec![name];
+        func_args.append(&mut args);
+
+        Instruction::Value {
+            args: func_args,
+            dst,
+            op: ValueOp::Call,
+            op_type,
         }
     }
 }
@@ -348,6 +391,23 @@ impl fmt::Display for Function {
     }
 }
 
+impl Function {
+    /// Create a new function with a name.
+    fn new(name: String) -> Self {
+        Self {
+            name,
+            args: vec![],
+            body: vec![],
+            return_type: None,
+        }
+    }
+
+    /// Push an instruction.
+    fn push(&mut self, inst: Instruction) {
+        self.body.push(inst)
+    }
+}
+
 /// `IRGenerator` generates an intermediate representation by walking the AST
 /// and building a intermediate representation of the original program.
 ///
@@ -357,15 +417,18 @@ pub struct IRGenerator<'a> {
     program: Vec<Function>,
     ast: &'a ast::AST,
     var_count: u32,
+    curr: usize,
 }
 
 impl<'a> IRGenerator<'a> {
     #[must_use]
-    pub const fn new(ast: &'a ast::AST) -> Self {
+    pub fn new(ast: &'a ast::AST) -> Self {
+        let main = Function::new("main".to_string());
         Self {
-            program: Vec::new(),
+            program: vec![main],
             ast,
             var_count: 0u32,
+            curr: 0,
         }
     }
 
@@ -374,8 +437,17 @@ impl<'a> IRGenerator<'a> {
         &self.program
     }
 
-    /// Emit a constant operation.
-    fn emit_const_op() {}
+    /// Returns a fresh variable name, used for intermediate literals.
+    fn next_var(&mut self) -> String {
+        let var = format!("v{}", self.var_count);
+        self.var_count += 1;
+        var
+    }
+
+    /// Push an instruction to the current function scope.
+    fn push(&mut self, inst: Instruction) {
+        self.program[self.curr].push(inst)
+    }
 
     pub fn gen(&mut self) {
         for stmt in self.ast.declarations() {
@@ -408,14 +480,19 @@ impl<'a> IRGenerator<'a> {
     }
 }
 
-impl<'a> ast::Visitor<u32> for IRGenerator<'a> {
-    fn visit_stmt(&mut self, stmt: &ast::Stmt) -> u32 {
+impl<'a> ast::Visitor<()> for IRGenerator<'a> {
+    fn visit_stmt(&mut self, stmt: &ast::Stmt) {
         match *stmt {
             _ => todo!("Unimplemented visitor for Node {:?}", stmt),
         }
     }
-    fn visit_expr(&mut self, expr: &ast::Expr) -> u32 {
+    fn visit_expr(&mut self, expr: &ast::Expr) {
         match *expr {
+            ast::Expr::IntLiteral(value) => {
+                let dst = self.next_var();
+                let inst = Instruction::emit_const(dst, Type::Int, Literal::Int(value));
+                self.push(inst)
+            }
             _ => todo!("Unimplemented visitor for Node {:?}", expr),
         }
     }
@@ -448,9 +525,5 @@ mod tests {
         };
     }
 
-    test_ir_gen!(
-        can_parse_return_statements,
-        "return 1 + 2 + 3 + 4;",
-        &vec![Instruction::Const { 0, 1 }]
-    );
+    test_ir_gen!(can_generate_const_ops, "1;", &vec![]);
 }
