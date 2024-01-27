@@ -102,6 +102,7 @@ impl Parser {
         match *self.peek() {
             Token::Return => self.return_stmt(),
             Token::LBrace => self.block(),
+            Token::For => self.loop_statement(),
             Token::If => self.if_stmt(),
             _ => self.expr_stmt(),
         }
@@ -140,6 +141,7 @@ impl Parser {
             }
             // Variable declaration with right value assignment.
             Token::Equal => {
+                self.eat(&Token::Equal);
                 let assigned = self.expression();
                 self.eat(&Token::SemiColon);
                 Stmt::VarDecl {
@@ -252,8 +254,37 @@ impl Parser {
             }
             _ => Stmt::If(conditional, body_ref, None),
         }
-        // Optional part.
-        // Stmt::If(conditional, body_ref, None)
+    }
+
+    /// Parse a loop statement.
+    fn loop_statement(&mut self) -> Stmt {
+        self.eat(&Token::For);
+        // Opening parenthesis.
+        self.eat(&Token::LParen);
+        // Parse initialization.
+        let init = match self.peek() {
+            // No starting condition for the `For` loop.
+            &Token::SemiColon => None,
+            _ => Some(self.expression()),
+        };
+        self.eat(&Token::SemiColon);
+        // Parse the condition.
+        let condition = match self.peek() {
+            &Token::SemiColon => None,
+            _ => Some(self.expression()),
+        };
+        self.eat(&Token::SemiColon);
+        // Iteration expression.
+        let iter = match self.peek() {
+            &Token::RParen => None,
+            _ => Some(self.expression()),
+        };
+        self.eat(&Token::RParen);
+        // Loop body.
+        let body = self.declaration();
+        let body_ref = self.ast.push_stmt(body);
+
+        Stmt::For(init, condition, iter, body_ref)
     }
 
     /// Parse a return statement.
@@ -266,7 +297,7 @@ impl Parser {
 
     /// Parse an expression.
     fn expression(&mut self) -> ExprRef {
-        self.precedence(Precedence::Assignment)
+        self.precedence(Precedence::None)
     }
 
     /// Parse an expression by its precedence level.
@@ -281,7 +312,6 @@ impl Parser {
             }
             &Token::True => self.ast.push_expr(Expr::BoolLiteral(true)),
             &Token::False => self.ast.push_expr(Expr::BoolLiteral(false)),
-            &Token::Equal => self.assignment(),
             Token::Identifier(_) => self.named(),
             _ => todo!("Unexpected prefix token {}", self.prev()),
         };
@@ -301,6 +331,8 @@ impl Parser {
                 | &Token::Lesser => self.comparison(prefix_ref),
                 // Call expressions.
                 &Token::LParen => self.call(prefix_ref),
+                // Assignment.
+                &Token::Equal => self.assignment(prefix_ref),
                 _ => todo!("Unexpected infix token {}", self.peek()),
             };
 
@@ -377,11 +409,14 @@ impl Parser {
     }
 
     /// Parse an assignment expression.
-    fn assignment(&mut self) -> ExprRef {
+    fn assignment(&mut self, left: ExprRef) -> ExprRef {
         // Parse the right hand side expression.
         let expr_ref = self.precedence(Precedence::None);
         self.eat(&Token::SemiColon);
-        expr_ref
+        self.ast.push_expr(Expr::Assignment {
+            name: left,
+            value: expr_ref,
+        })
     }
 
     /// Parse a named expression such as "x".
@@ -737,5 +772,13 @@ Stmt(Block {
 Stmt(VAR(INT_TYPE, x, 0)),
 }),
 }"
+    );
+
+    test_parser!(
+        can_parse_for_stmt,
+        r#"for(;;) { i = i + 1; }"#,
+        "FOR(, , , Block {
+Stmt(Expr(Assign(Named(i), Add(Named(i), 1)))),
+})"
     );
 }

@@ -284,6 +284,11 @@ pub enum Expr {
     CharLiteral(char),
     // Grouping expressions (parenthesised expressions).
     Grouping(ExprRef),
+    // Assignment expressions.
+    Assignment {
+        name: ExprRef,
+        value: ExprRef,
+    },
     // Binary operations (arithmetic, boolean, bitwise).
     BinOp {
         left: ExprRef,
@@ -331,8 +336,10 @@ pub enum Stmt {
     Block(Vec<StmtRef>),
     // If statements.
     If(ExprRef, StmtRef, Option<StmtRef>),
-    // Loops are represented as While loops and For loops are de-sugarized into `While` loops.
-    While(ExprRef, StmtRef),
+    // For loops.
+    For(Option<ExprRef>, Option<ExprRef>, Option<ExprRef>, StmtRef),
+    // While loops.
+    While(Option<ExprRef>, Option<StmtRef>),
     // Empty statement.
     Empty,
 }
@@ -453,6 +460,17 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
     /// Visit an expression and return its textual representation.
     fn visit_expr(&mut self, expr: &Expr) -> String {
         match expr {
+            &Expr::Assignment { name, value } => {
+                let name = self.ast.get_expr(name).map_or_else(
+                    || unreachable!("missing named expression for assignment"),
+                    |name| self.visit_expr(name),
+                );
+                let value = self.ast.get_expr(value).map_or_else(
+                    || unreachable!("missing named expression for assignment"),
+                    |value| self.visit_expr(value),
+                );
+                format!("Assign({name}, {value})")
+            }
             &Expr::IntLiteral(value) => value.to_string(),
             &Expr::BoolLiteral(value) => value.to_string(),
             &Expr::UnaryOp { operator, operand } => self.ast.get_expr(operand).map_or_else(
@@ -652,6 +670,38 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
 
                     None => format!("IF({cond}, {then_block})"),
                 }
+            }
+            Stmt::For(init_ref, cond_ref, iter_ref, body_ref) => {
+                let init = match init_ref {
+                    None => "".to_string(),
+                    Some(expr_ref) => self.ast.get_expr(*expr_ref).map_or_else(
+                        || unreachable!("missing expression in `for` statement"),
+                        |init_expr| self.visit_expr(init_expr),
+                    ),
+                };
+
+                let cond = match cond_ref {
+                    None => "".to_string(),
+                    Some(expr_ref) => self.ast.get_expr(*expr_ref).map_or_else(
+                        || unreachable!("missing expression in `for` statement"),
+                        |cond_expr| self.visit_expr(cond_expr),
+                    ),
+                };
+
+                let iter = match iter_ref {
+                    None => "".to_string(),
+                    Some(expr_ref) => self.ast.get_expr(*expr_ref).map_or_else(
+                        || unreachable!("missing expression in `for` statement"),
+                        |iter_expr| self.visit_expr(iter_expr),
+                    ),
+                };
+
+                let body = self.ast.get_stmt(*body_ref).map_or_else(
+                    || unreachable!("expected `for` statement to have body"),
+                    |body_stmt| self.visit_stmt(body_stmt),
+                );
+
+                format!("FOR({init}, {cond}, {iter}, {body})")
             }
             Stmt::Empty => unreachable!(
                 "empty statement is a temporary placeholder and should not be in the ast"
