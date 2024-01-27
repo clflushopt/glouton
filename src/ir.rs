@@ -6,7 +6,6 @@
 //! value operations which take operands and produce values and effect based
 //! operations which take operands and produce no values.
 use core::fmt;
-use std::fmt::Display;
 
 use crate::ast::{self, Visitor};
 
@@ -46,6 +45,98 @@ impl fmt::Display for Literal {
     }
 }
 
+/// ConstOp are opcodes for constant operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ConstOp {
+    /// `const` operation.
+    Const,
+}
+
+impl fmt::Display for ConstOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Const => write!(f, "const"),
+        }
+    }
+}
+
+/// EffectOp are opcodes for effect operations such as control flow operations
+/// (indirect jumps, conditional branches, calls...).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EffectOp {
+    // Indirect jumps.
+    Jump,
+    // Condtional branches.
+    Branch,
+    // Function calls that don't produce values.
+    Call,
+    // Return statements.
+    Return,
+    // No operation.
+    Nop,
+}
+
+impl fmt::Display for EffectOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Jump => write!(f, "jmp"),
+            Self::Branch => write!(f, "br"),
+            Self::Call => write!(f, "call"),
+            Self::Return => write!(f, "ret"),
+            Self::Nop => write!(f, "nop"),
+        }
+    }
+}
+
+/// ValueOp are opcodes for value operations, a value operation is any value
+/// producing operation. Such as arithemtic operations, comparison operations
+/// and loads or stores.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ValueOp {
+    // Arithmetic operators.
+    Add,
+    Sub,
+    Mul,
+    Div,
+    // Comparison operators.
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Lte,
+    Gte,
+    // Boolean operators.
+    Not,
+    And,
+    Or,
+    // Function calls that produce values.
+    Call,
+    // Identity operator.
+    Id,
+}
+
+impl fmt::Display for ValueOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Add => write!(f, "add"),
+            Self::Sub => write!(f, "sub"),
+            Self::Mul => write!(f, "mul"),
+            Self::Div => write!(f, "div"),
+            Self::Eq => write!(f, "eq"),
+            Self::Neq => write!(f, "neq"),
+            Self::Lt => write!(f, "lt"),
+            Self::Gt => write!(f, "gt"),
+            Self::Lte => write!(f, "lte"),
+            Self::Gte => write!(f, "gte"),
+            Self::Not => write!(f, "not"),
+            Self::And => write!(f, "and"),
+            Self::Or => write!(f, "or"),
+            Self::Call => write!(f, "call"),
+            Self::Id => write!(f, "id"),
+        }
+    }
+}
+
 /// Instruction are the atomic operations of the linear IR part in GIR
 /// they compose the building blocks of basic blocks.
 ///
@@ -74,58 +165,126 @@ impl fmt::Display for Literal {
 /// variables.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {
-    // The constant instruction produces a single constant integer value
-    // to a destination variable, in case of literal values the destination
-    // is either the variable defined in the AST in the case of assignment
-    // expressions or a one created by the generator.
-    Const {
-        dst: u32,
+    // Constant instructions are instructions that produce a single constant
+    // typed value to a destination variable.
+    Constant {
+        // Destination variable name.
+        dst: String,
+        // Opcode for the instruction, currently only `const`.
+        op: ConstOp,
+        // Type of the variable.
         const_type: Type,
-        const_value: Literal,
+        // Literal value stored.
+        value: Literal,
     },
-    // Value operations.
-    //
-    // Arithmetic instructions.
-    Add {
-        lhs: u32,
-        rhs: u32,
-        dst: u32,
+
+    // Value instructions that produce a value from arguments where each opcode
+    // enforces the rules for the arguments.
+    Value {
+        // List of argument names (variable, function or label).
+        args: Vec<String>,
+        // Destination variable name.
+        dst: String,
+        // Opcode for the instruction.
+        op: ValueOp,
+        // Type of the variable.
+        op_type: Type,
     },
-    Sub {
-        lhs: u32,
-        rhs: u32,
-        dst: u32,
-    },
-    Mul {
-        lhs: u32,
-        rhs: u32,
-        dst: u32,
-    },
-    Div {
-        lhs: u32,
-        rhs: u32,
-        dst: u32,
-    },
-    // Return instruction is an effect operation that transfers execution
-    // back to the caller.
-    Ret,
-    // Label is a special instruction that acts as a marker.
-    Label {
-        // Label name.
-        label: String,
+    // Effect instructions that incur a side effect.
+    Effect {
+        // List of argument names (variable, function or label).
+        args: Vec<String>,
+        // Opcode for the instruction.
+        op: EffectOp,
     },
 }
 
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Self::Const {
+        match self {
+            Self::Constant {
                 dst,
-                const_type: _,
-                const_value,
-            } => write!(f, "var_{dst}: int = const {const_value}"),
-            Self::Add { lhs, rhs, dst } => write!(f, "var_{dst} = var_{lhs} + var_{rhs}"),
-            _ => todo!("Unimplemented display for instruction {}", self),
+                op,
+                const_type,
+                value,
+            } => {
+                write!(f, "{dst}: {const_type} = {op} {value};")
+            }
+            Self::Value {
+                args,
+                dst,
+                op,
+                op_type,
+            } => {
+                write!(f, "{dst}: {op_type} = {op}")?;
+                for arg in args {
+                    match op {
+                        ValueOp::Call => write!(f, "@{arg}")?,
+                        _ => write!(f, "{arg}")?,
+                    }
+                }
+                write!(f, ";")
+            }
+            Self::Effect { args, op } => {
+                write!(f, "{op}")?;
+                for arg in args {
+                    match op {
+                        EffectOp::Jump => write!(f, ".{arg}")?,
+                        EffectOp::Call => write!(f, "@{arg}")?,
+                        EffectOp::Branch => write!(f, ".{arg}")?,
+                        EffectOp::Return => write!(f, ".{arg}")?,
+                        EffectOp::Nop => write!(f, ".")?,
+                    }
+                }
+                write!(f, ";")
+            }
+        }
+    }
+}
+
+impl Instruction {
+    /// Emit a constant instruction.
+    fn emit_const(dst: String, const_type: Type, value: Literal) -> Instruction {
+        Instruction::Constant {
+            dst,
+            op: ConstOp::Const,
+            const_type,
+            value,
+        }
+    }
+
+    /// Emit a jump instruction.
+    fn emit_jmp(target: String) -> Instruction {
+        Instruction::Effect {
+            args: vec![target],
+            op: EffectOp::Jump,
+        }
+    }
+
+    /// Emit a branch instruction.
+    fn emit_branch(cond: String, then_target: String, else_target: String) -> Instruction {
+        Instruction::Effect {
+            args: vec![cond, then_target, else_target],
+            op: EffectOp::Branch,
+        }
+    }
+
+    /// Emit a call instruction.
+    fn emit_call(func: String, args: Vec<String>) -> Instruction {
+        let mut call_args = vec![func];
+        call_args.extend(args);
+
+        Instruction::Effect {
+            args: call_args,
+            op: EffectOp::Call,
+        }
+    }
+
+    /// Emit a return instruction.
+    fn emit_ret(value: String) -> Instruction {
+        Instruction::Effect {
+            args: vec![value],
+            op: EffectOp::Return,
         }
     }
 }
