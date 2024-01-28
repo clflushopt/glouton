@@ -535,9 +535,7 @@ impl<'a> IRGenerator<'a> {
     }
 
     pub fn gen(&mut self) {
-        for stmt in self.ast.declarations() {
-            self.visit_stmt(stmt);
-        }
+        ast::visit(self.ast, self)
     }
 }
 
@@ -641,9 +639,8 @@ mod tests {
                 parser.parse();
                 let mut irgen = IRGenerator::new(parser.ast());
                 irgen.gen();
-                let program = irgen.program();
 
-                for inst in program {
+                for inst in irgen.program() {
                     println!("{inst}");
                 }
             }

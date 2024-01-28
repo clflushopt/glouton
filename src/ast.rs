@@ -362,6 +362,13 @@ pub trait Visitor<T> {
     fn visit_stmt(&mut self, stmt: &Stmt) -> T;
 }
 
+/// Accept and run a visitor over an AST.
+pub fn visit<T>(ast: &AST, visitor: &'_ mut dyn Visitor<T>) {
+    for decl in ast.declarations() {
+        visitor.visit_stmt(decl);
+    }
+}
+
 /// Display implementation uses the `ASTDisplayer` to display the AST.
 impl fmt::Display for AST {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
