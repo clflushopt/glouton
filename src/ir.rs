@@ -10,19 +10,37 @@ use core::fmt;
 use crate::ast::{self, Visitor};
 
 /// Types used in the IR.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Type {
+    // Empty type.
+    #[default]
+    Unit,
     // Integers, defaults to i32.
     Int,
     // Booleans.
     Bool,
+    // Characters.
+    Char,
 }
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Unit => write!(f, ""),
             Self::Int => write!(f, "int"),
             Self::Bool => write!(f, "bool"),
+            Self::Char => write!(f, "char"),
+        }
+    }
+}
+
+impl Type {
+    /// Returns an IR type from an AST declaration type.
+    fn from(value: &ast::DeclType) -> Self {
+        match value {
+            ast::DeclType::Int => Self::Int,
+            ast::DeclType::Char => Self::Char,
+            ast::DeclType::Bool => Self::Bool,
         }
     }
 }
@@ -226,13 +244,13 @@ impl fmt::Display for Instruction {
                 write!(f, ";")
             }
             Self::Effect { args, op } => {
-                write!(f, "{op}")?;
+                write!(f, "{op} ")?;
                 for arg in args {
                     match op {
                         EffectOp::Jump => write!(f, ".{arg}")?,
                         EffectOp::Call => write!(f, "@{arg}")?,
                         EffectOp::Branch => write!(f, ".{arg}")?,
-                        EffectOp::Return => write!(f, ".{arg}")?,
+                        EffectOp::Return => write!(f, "{arg}")?,
                         EffectOp::Nop => write!(f, ".")?,
                     }
                 }
@@ -243,6 +261,9 @@ impl fmt::Display for Instruction {
 }
 
 impl Instruction {
+    /// Instruction emitters are all owning functions, they take ownership
+    /// of their arguments to build an `Instruction`.
+    ///
     /// Emit a constant instruction.
     fn emit_const(dst: String, const_type: Type, value: Literal) -> Instruction {
         Instruction::Constant {
@@ -334,7 +355,7 @@ impl Instruction {
 
 /// `Argument` is a wrapper around a name and type it represents a single
 /// function argument.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Argument {
     // Argument name.
     name: String,
@@ -345,6 +366,12 @@ pub struct Argument {
 impl fmt::Display for Argument {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.name, self.kind)
+    }
+}
+
+impl Argument {
+    fn new(name: String, kind: Type) -> Self {
+        Self { name, kind }
     }
 }
 
@@ -402,10 +429,37 @@ impl Function {
         }
     }
 
+    /// Set function arguments to `args`.
+    fn args(mut self, args: Vec<Argument>) -> Self {
+        self.args = args;
+        self
+    }
+
+    /// Set the return type of the function.
+    fn returns(mut self, t: Type) -> Self {
+        self.return_type = Some(t);
+        self
+    }
+
+    /// Set the function body.
+    fn body(mut self, body: Vec<Instruction>) -> Self {
+        self.body = body;
+        self
+    }
+
     /// Push an instruction.
     fn push(&mut self, inst: Instruction) {
         self.body.push(inst)
     }
+}
+
+/// Scope of the current AST node we are processing, this is an internal detail
+/// of the `IRGenerator` and is used to decide where the current declaration
+/// lives. This is mostly for global variable declarations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Scope {
+    Global,
+    Local,
 }
 
 /// `IRGenerator` generates an intermediate representation by walking the AST
@@ -414,21 +468,30 @@ impl Function {
 /// The result of the process is a `Vec` of IR generated functions and a global
 /// scope used to hold global variable declarations.
 pub struct IRGenerator<'a> {
+    // Program as a sequence of functions.
     program: Vec<Function>,
+    // Global scope declarations.
+    glob: Vec<Instruction>,
+    // Reference to the AST we are processing.
     ast: &'a ast::AST,
+    // Variable counter used to create new variables.
     var_count: u32,
+    // Index in the `program` of the current function we are building.
     curr: usize,
+    // Current scope.
+    scope: Scope,
 }
 
 impl<'a> IRGenerator<'a> {
     #[must_use]
     pub fn new(ast: &'a ast::AST) -> Self {
-        let main = Function::new("main".to_string());
         Self {
-            program: vec![main],
+            program: vec![],
+            glob: vec![],
             ast,
-            var_count: 0u32,
+            var_count: 0,
             curr: 0,
+            scope: Scope::Global,
         }
     }
 
@@ -444,45 +507,107 @@ impl<'a> IRGenerator<'a> {
         var
     }
 
-    /// Push an instruction to the current function scope.
+    /// Push an instruction to the current scope.
     fn push(&mut self, inst: Instruction) {
-        self.program[self.curr].push(inst)
+        match self.scope {
+            Scope::Local => self.program[self.curr].push(inst),
+            // TODO: assert that the instruction is not illegal in the global
+            // scope i.e (not a branch for e.x)
+            Scope::Global => self.glob.push(inst),
+        }
+    }
+
+    /// Switch to a local scope view.
+    fn enter(&mut self, func: Function) {
+        self.program.push(func);
+        self.scope = Scope::Local
+    }
+
+    /// Exit back to the global scope.
+    fn exit(&mut self) {
+        self.scope = Scope::Global;
+        self.curr += 1
+    }
+
+    /// Returns a reference to the last pushed instruction.
+    fn last(&self) -> Option<&Instruction> {
+        self.program[self.curr].body.last()
     }
 
     pub fn gen(&mut self) {
         for stmt in self.ast.declarations() {
-            match stmt {
-                ast::Stmt::Return(expr_ref) => self.ast.get_expr(*expr_ref).map_or_else(
-                    || unreachable!("Return statement is missing expression ref"),
-                    |expr| {
-                        let _ = self.visit_expr(expr);
-                    },
-                ),
-                ast::Stmt::VarDecl {
-                    decl_type: _,
-                    name: _,
-                    value,
-                } => self.ast.get_expr(*value).map_or_else(
-                    || unreachable!("Variable declaration is missing assignmenet"),
-                    |expr| {
-                        let _ = self.visit_expr(expr);
-                    },
-                ),
-                ast::Stmt::Expr(expr_ref) => self.ast.get_expr(*expr_ref).map_or_else(
-                    || unreachable!("Expr statement is missing expression ref"),
-                    |expr| {
-                        let _ = self.visit_expr(expr);
-                    },
-                ),
-                _ => todo!("unimplemented ir gen phase for stmt {:?}", stmt),
-            };
+            self.visit_stmt(stmt);
         }
     }
 }
 
 impl<'a> ast::Visitor<()> for IRGenerator<'a> {
     fn visit_stmt(&mut self, stmt: &ast::Stmt) {
-        match *stmt {
+        match stmt {
+            // Function declarations are the only place where we need to switch
+            // scopes explicitely, since the scope only affects where variable
+            // declarations are positioned.
+            ast::Stmt::FuncDecl {
+                name,
+                return_type,
+                args,
+                body,
+            } => {
+                // Build and push a new function frame.
+                let func_args = args
+                    .iter()
+                    .map(|arg| match self.ast.get_stmt(*arg) {
+                        Some(ast::Stmt::FuncArg { decl_type, name }) => {
+                            Argument::new(name.to_string(), Type::from(decl_type))
+                        }
+                        _ => unreachable!(
+                        "expected argument reference to be valid and to be `ast::Stmt::FuncArg`"
+                    ),
+                    })
+                    .collect::<Vec<_>>();
+                let func_return_type = Type::from(return_type);
+
+                let func = Function::new(name.to_string())
+                    .args(func_args)
+                    .returns(func_return_type);
+
+                // Enter a new scope and push the new function frame.
+                self.enter(func);
+                // Generate IR for the body.
+                match self.ast.get_stmt(*body) {
+                    Some(stmt) => self.visit_stmt(stmt),
+                    _ => unreachable!("expected body reference to be valid !"),
+                }
+                // Exit back to the global scope.
+                self.exit()
+            }
+            // Variable declaration are
+            ast::Stmt::VarDecl {
+                decl_type,
+                name,
+                value,
+            } => {}
+            // Blocks.
+            ast::Stmt::Block(stmts) => {
+                for stmt_ref in stmts {
+                    if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
+                        self.visit_stmt(stmt)
+                    }
+                }
+            }
+            // Return statements.
+            ast::Stmt::Return(expr_ref) => {
+                if let Some(expr) = self.ast.get_expr(*expr_ref) {
+                    self.visit_expr(expr)
+                }
+                let ret_name = match self.last() {
+                    Some(Instruction::Value { dst, .. }) => dst.clone(),
+                    Some(Instruction::Constant { dst, .. }) => dst.clone(),
+                    _ => unreachable!("expected last instruction in return to be value or const"),
+                };
+                let ret = Instruction::emit_ret(ret_name);
+                self.push(ret)
+            }
             _ => todo!("Unimplemented visitor for Node {:?}", stmt),
         }
     }
@@ -525,5 +650,5 @@ mod tests {
         };
     }
 
-    test_ir_gen!(can_generate_const_ops, "1;", &vec![]);
+    test_ir_gen!(can_generate_const_ops, "int main() { return 0;}", &vec![]);
 }

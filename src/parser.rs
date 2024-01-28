@@ -102,7 +102,7 @@ impl Parser {
         match *self.peek() {
             Token::Return => self.return_stmt(),
             Token::LBrace => self.block(),
-            Token::For => self.loop_statement(),
+            Token::For => self.loop_stmt(),
             Token::If => self.if_stmt(),
             _ => self.expr_stmt(),
         }
@@ -115,13 +115,13 @@ impl Parser {
             return self.statement();
         }
 
-        let decl_type = match *self.consume() {
+        let decl_type = match *self.advance() {
             Token::Int => DeclType::Int,
             Token::Char => DeclType::Char,
             Token::Bool => DeclType::Bool,
             _ => unreachable!("Expected declaration type to be one of (int, char, bool)."),
         };
-        let identifier = match self.consume() {
+        let identifier = match self.advance() {
             Token::Identifier(ident) => ident.clone(),
             _ => unreachable!("Expected identifier, found {}", self.peek()),
         };
@@ -180,16 +180,16 @@ impl Parser {
     /// Parse function arguments.
     fn args(&mut self) -> Vec<StmtRef> {
         let mut args = vec![];
-        if !self.check(&Token::RParen) {
+        if !self.at(&Token::RParen) {
             loop {
-                let arg_type = match *self.consume() {
+                let arg_type = match *self.advance() {
                     Token::Int => DeclType::Int,
                     Token::Char => DeclType::Char,
                     Token::Bool => DeclType::Bool,
                     _ => unreachable!("expected type declaration found {}", self.peek()),
                 };
 
-                let arg_name = match self.consume() {
+                let arg_name = match self.advance() {
                     Token::Identifier(name) => name.clone(),
                     _ => unreachable!("expected identifier got {}", self.peek()),
                 };
@@ -200,7 +200,7 @@ impl Parser {
                 };
                 let arg_ref = self.ast.push_stmt(arg);
                 args.push(arg_ref);
-                if !self.match_next(&Token::Comma) {
+                if !self.expect(&Token::Comma) {
                     break;
                 }
             }
@@ -216,7 +216,7 @@ impl Parser {
         let mut stmts = vec![];
         // Parse and build the block.
         self.eat(&Token::LBrace);
-        while !self.check(&Token::RBrace) && !self.eof() {
+        while !self.at(&Token::RBrace) && !self.eof() {
             let stmt = self.declaration();
             let stmt_ref = self.ast.push_stmt(stmt);
 
@@ -257,7 +257,7 @@ impl Parser {
     }
 
     /// Parse a loop statement.
-    fn loop_statement(&mut self) -> Stmt {
+    fn loop_stmt(&mut self) -> Stmt {
         self.eat(&Token::For);
         // Opening parenthesis.
         self.eat(&Token::LParen);
@@ -297,13 +297,13 @@ impl Parser {
 
     /// Parse an expression.
     fn expression(&mut self) -> ExprRef {
-        self.precedence(Precedence::None)
+        self.by_precedence(Precedence::None)
     }
 
     /// Parse an expression by its precedence level.
-    fn precedence(&mut self, prec: Precedence) -> ExprRef {
+    fn by_precedence(&mut self, prec: Precedence) -> ExprRef {
         // Prefix part.
-        let mut prefix_ref = match self.consume() {
+        let mut prefix_ref = match self.advance() {
             &Token::LParen => self.grouping(),
             &Token::Minus | &Token::Bang => self.unary(),
             &Token::IntLiteral(value) => {
@@ -317,7 +317,7 @@ impl Parser {
         };
 
         while prec < Self::get_token_precedence(self.peek()) {
-            let infix_ref = match self.consume() {
+            let infix_ref = match self.advance() {
                 // Arithmetic expressions.
                 &Token::Plus | &Token::Minus | &Token::Star | &Token::Slash => {
                     self.binary(prefix_ref)
@@ -356,7 +356,7 @@ impl Parser {
         };
 
         let precedence = (Self::get_token_precedence(self.prev()) as u8 + 1).into();
-        let right = self.precedence(precedence);
+        let right = self.by_precedence(precedence);
         self.ast.push_expr(Expr::BinOp {
             left,
             operator,
@@ -375,7 +375,7 @@ impl Parser {
             _ => unreachable!("Unknown token in binary expression {}", self.peek()),
         };
         let precedence = Self::get_token_precedence(self.prev());
-        let right = self.precedence(precedence);
+        let right = self.by_precedence(precedence);
         self.ast.push_expr(Expr::BinOp {
             left,
             operator,
@@ -403,7 +403,7 @@ impl Parser {
         };
 
         // Parse the operand.
-        let operand = self.precedence(Precedence::Unary);
+        let operand = self.by_precedence(Precedence::Unary);
         // Push the grouping expression to the pool.
         self.ast.push_expr(Expr::UnaryOp { operator, operand })
     }
@@ -411,7 +411,7 @@ impl Parser {
     /// Parse an assignment expression.
     fn assignment(&mut self, left: ExprRef) -> ExprRef {
         // Parse the right hand side expression.
-        let expr_ref = self.precedence(Precedence::None);
+        let expr_ref = self.by_precedence(Precedence::None);
         self.eat(&Token::SemiColon);
         self.ast.push_expr(Expr::Assignment {
             name: left,
@@ -437,11 +437,11 @@ impl Parser {
     fn call(&mut self, name: ExprRef) -> ExprRef {
         let mut args = vec![];
 
-        if !self.match_next(&Token::RParen) {
-            while !self.match_next(&Token::RParen) {
+        if !self.expect(&Token::RParen) {
+            while !self.expect(&Token::RParen) {
                 args.push(self.expression());
 
-                if !self.match_next(&Token::Comma) {
+                if !self.expect(&Token::Comma) {
                     break;
                 }
             }
@@ -450,14 +450,6 @@ impl Parser {
         self.eat(&Token::RParen);
 
         self.ast.push_expr(Expr::Call { name, args })
-    }
-
-    fn match_next(&mut self, expected: &Token) -> bool {
-        if self.peek() != expected {
-            return false;
-        }
-        self.consume();
-        true
     }
 
     /// Parse an expression statement.
@@ -487,25 +479,35 @@ impl Parser {
         }
     }
 
+    /// Check if the next token is the expected one, if that's the case advance
+    /// to the next token and return true, otherwise return false.
+    fn expect(&mut self, expected: &Token) -> bool {
+        if self.peek() != expected {
+            return false;
+        }
+        self.advance();
+        true
+    }
+
     /// Match the current token against the given token, if they match
     /// consume the token and return it. Otherwise returns `None`.
     fn eat(&mut self, token: &Token) -> Option<&Token> {
-        if self.check(token) {
-            return Some(self.consume());
+        if self.at(token) {
+            return Some(self.advance());
         }
         None
     }
 
     /// Check if the current token is the expected one.
-    fn check(&self, token: &Token) -> bool {
+    fn at(&self, token: &Token) -> bool {
         if self.eof() {
             return false;
         }
         self.peek() == token
     }
 
-    /// Consume the current token and return it.
-    fn consume(&mut self) -> &Token {
+    /// Advance cursor and return previous token unless we reach `Eof`.
+    fn advance(&mut self) -> &Token {
         if !self.eof() {
             self.cursor += 1;
         }
