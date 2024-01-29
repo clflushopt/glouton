@@ -386,7 +386,7 @@ pub struct Function {
     // Body of the function as GIR instructions.
     body: Vec<Instruction>,
     // Return type of the function if any.
-    return_type: Option<Type>,
+    return_type: Type,
 }
 
 impl fmt::Display for Function {
@@ -405,9 +405,7 @@ impl fmt::Display for Function {
             write!(f, ")")?;
         }
 
-        if let Some(return_type) = self.return_type {
-            write!(f, ": {return_type}")?;
-        }
+        write!(f, ": {}", self.return_type)?;
 
         writeln!(f, " {{")?;
 
@@ -420,31 +418,13 @@ impl fmt::Display for Function {
 
 impl Function {
     /// Create a new function with a name.
-    fn new(name: String) -> Self {
+    fn new(name: String, args: Vec<Argument>, return_type: Type) -> Self {
         Self {
             name,
-            args: vec![],
+            args,
+            return_type,
             body: vec![],
-            return_type: None,
         }
-    }
-
-    /// Set function arguments to `args`.
-    fn args(mut self, args: Vec<Argument>) -> Self {
-        self.args = args;
-        self
-    }
-
-    /// Set the return type of the function.
-    fn returns(mut self, t: Type) -> Self {
-        self.return_type = Some(t);
-        self
-    }
-
-    /// Set the function body.
-    fn body(mut self, body: Vec<Instruction>) -> Self {
-        self.body = body;
-        self
     }
 
     /// Push an instruction.
@@ -565,9 +545,7 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                     .collect::<Vec<_>>();
                 let func_return_type = Type::from(return_type);
 
-                let func = Function::new(name.to_string())
-                    .args(func_args)
-                    .returns(func_return_type);
+                let func = Function::new(name.to_string(), func_args, func_return_type);
 
                 // Enter a new scope and push the new function frame.
                 self.enter(func);
