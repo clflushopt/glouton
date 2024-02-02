@@ -400,7 +400,7 @@ impl<'a> ast::Visitor<()> for Analyzer<'a> {
 }
 
 /// TypeChecker implements an AST visitor responsible for ensuring the type
-/// correctness of C0 programs.
+/// correctness of input programs.
 pub struct TypeChecker<'a> {
     ast: &'a ast::AST,
 }

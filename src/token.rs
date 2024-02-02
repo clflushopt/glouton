@@ -1,5 +1,5 @@
 //! Implementation of language tokens.
-use std::fmt::{self};
+use std::fmt;
 
 /// Language defined keywords.
 pub const KEYWORDS: &[&str] = &[
