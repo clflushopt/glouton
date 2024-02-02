@@ -18,10 +18,11 @@ C0 is a safe subset of C you can find out more in the [official website](https:/
 ## Docs
 
 - [Frontend: Design of the scanner and parser](docs/frontend.md)
-- [IR: Building a control flow graph from the AST](docs/cfg.md)
-- [IR: Building a sea of nodes from the AST](docs/sea.md)
+- [IR: Bril as an intermediate representation](docs/ir.md)
+- [IR: Building a control flow graph](docs/cfg.md)
+- [IR: Building a sea of nodes representation](docs/sea.md)
 - [Optimizations: Transforms and Passes approach](docs/optimizations.md)
 - [Optimizations: Catalogue of optimizations (in details)](docs/optimref.md)
-- [Backend: The first steps towrads a code generator](docs/codegen.md)
+- [Backend: The first steps towards a code generator](docs/codegen.md)
 - [Backend: Instruction selection, scheduling and register allocation](docs/backend.md)
 

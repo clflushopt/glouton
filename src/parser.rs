@@ -543,7 +543,9 @@ mod tests {
             fn $name() {
                 let source = $source;
                 let mut scanner = Scanner::new(source);
-                let tokens = scanner.scan().unwrap();
+                let tokens = scanner
+                    .scan()
+                    .expect("Expected source code for test case to be valid !");
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
                 assert_eq!(parser.ast().to_string(), $expected);

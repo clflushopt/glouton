@@ -244,9 +244,7 @@ impl<'a> Analyzer<'a> {
     fn define(&mut self, stmt: &ast::Stmt) {
         match stmt {
             Stmt::VarDecl {
-                decl_type,
-                name,
-                value,
+                decl_type, name, ..
             } => {
                 let scope = self.scope();
                 let position = match scope {
@@ -255,19 +253,40 @@ impl<'a> Analyzer<'a> {
                 };
                 let sym = Symbol::new(name, *decl_type, scope, Kind::Variable, position);
                 self.table.bind(name, sym)
+                // TODO: Ensure r-value type matches l-value declared type.
             }
             Stmt::FuncDecl {
                 name,
                 return_type,
                 args,
-                body,
+                ..
             } => {
+                // Bind the function name.
                 let scope = self.scope();
                 if self.scope() == Scope::Local {
                     unreachable!("function declarations not allowed in local scope")
                 }
                 let sym = Symbol::new(name, *return_type, scope, Kind::Function, 0);
-                self.table.bind(name, sym)
+                self.table.bind(name, sym);
+                // Bind arguments.
+                for arg in args {
+                    match self.ast.get_stmt(*arg) {
+                        Some(Stmt::FuncArg { decl_type, name }) => {
+                            let sym = Symbol::new(
+                                &name,
+                                *decl_type,
+                                Scope::Argument,
+                                Kind::Variable,
+                                self.table.stack_position(),
+                            );
+                            self.table.bind(name, sym)
+                        }
+                        arg @ _ => unreachable!(
+                            "unxpected statement kind, expected function argument got {:?}",
+                            arg
+                        ),
+                    }
+                }
             }
             _ => todo!("unimplemented `define` for {:?}", stmt),
         }

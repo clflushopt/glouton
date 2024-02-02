@@ -1,10 +1,10 @@
 //! Global intermediate representation definition and implementation.
 //!
 //! Glouton Intermediate Representation is a linear SSA based intermediate
-//! representation. The intermediate representation has three core
-//! instruction types, constant operations which produce constant values
-//! value operations which take operands and produce values and effect based
-//! operations which take operands and produce no values.
+//! representation. The intermediate representation is based on Bril and
+//! has three core instruction types, constant operations which produce
+//! constant values, value operations which take operands and produce values
+//! and effect based operations which take operands and produce no values.
 use core::fmt;
 
 use crate::ast::{self, Visitor};
@@ -612,7 +612,9 @@ mod tests {
             fn $name() {
                 let source = $source;
                 let mut scanner = Scanner::new(source);
-                let tokens = scanner.scan().unwrap();
+                let tokens = scanner
+                    .scan()
+                    .expect("expected test case source to be valid");
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
                 let mut irgen = IRGenerator::new(parser.ast());

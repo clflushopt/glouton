@@ -157,7 +157,10 @@ impl Scanner<'_> {
         let int_literal = self.source[self.start..self.cursor]
             .iter()
             .collect::<String>();
-        let value = int_literal.as_str().parse::<i32>().unwrap();
+        let value = int_literal
+            .as_str()
+            .parse::<i32>()
+            .expect("expected integer literal to be valid");
         Token::IntLiteral(value)
     }
 
