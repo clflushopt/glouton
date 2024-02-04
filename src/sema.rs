@@ -288,7 +288,7 @@ impl<'a> Analyzer<'a> {
                     }
                 }
             }
-            _ => todo!("unimplemented `define` for {:?}", stmt),
+            _ => unreachable!("unexpected `define` for {:?}", stmt),
         }
     }
 
@@ -331,7 +331,7 @@ impl<'a> Analyzer<'a> {
                     }
                 }
             }
-            ast::Expr::Assignment { name, value } => match self.ast.get_expr(*name) {
+            ast::Expr::Assignment { name, .. } => match self.ast.get_expr(*name) {
                 Some(ast::Expr::Named(name)) => if let Some(symbol) = self.lookup(&name) {},
                 _ => panic!("expected l-value to be defined"),
             },
@@ -420,10 +420,6 @@ impl TypeChecker<'_> {
     fn get_decl_type(stmt: &Stmt) -> ast::DeclType {
         ast::DeclType::Int
     }
-}
-
-macro_rules! typecheck {
-    () => {};
 }
 
 impl<'a> ast::Visitor<()> for TypeChecker<'a> {

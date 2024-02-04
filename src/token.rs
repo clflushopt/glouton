@@ -65,6 +65,7 @@ pub enum Token {
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
+            // Syntactic enclosures.
             Self::LParen => write!(f, "("),
             Self::RParen => write!(f, ")"),
             Self::LBrace => write!(f, "{{"),
@@ -74,6 +75,11 @@ impl fmt::Display for Token {
             Self::SemiColon => write!(f, ";"),
             Self::Colon => write!(f, ":"),
             Self::Comma => write!(f, ","),
+            // Operators.
+            Self::Plus => write!(f, "+"),
+            Self::Minus => write!(f, "-"),
+            Self::Slash => write!(f, "/"),
+            Self::Star => write!(f, "*"),
             Self::Equal => write!(f, "ASSIGN"),
             Self::EqualEqual => write!(f, "EQUAL"),
             Self::BangEqual => write!(f, "NEQ"),
@@ -81,10 +87,6 @@ impl fmt::Display for Token {
             Self::GreaterEqual => write!(f, "GTE"),
             Self::Lesser => write!(f, "LT"),
             Self::LesserEqual => write!(f, "LTE"),
-            Self::Plus => write!(f, "+"),
-            Self::Minus => write!(f, "-"),
-            Self::Slash => write!(f, "/"),
-            Self::Star => write!(f, "*"),
             Self::And => write!(f, "AND"),
             Self::Or => write!(f, "OR"),
             Self::Bang => write!(f, "NOT"),

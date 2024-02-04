@@ -375,8 +375,7 @@ impl fmt::Display for AST {
         let mut displayer = ASTDisplayer::new(self);
         self.declarations()
             .iter()
-            .map(|decl| write!(f, "{}", displayer.visit_stmt(decl)))
-            .collect()
+            .try_for_each(|decl| write!(f, "{}", displayer.visit_stmt(decl)))
     }
 }
 
@@ -559,8 +558,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 || unreachable!("unary node is missing operand"),
                 |expr| format!("Grouping({})", self.visit_expr(expr)),
             ),
-            Expr::Named(name) => {
-                let name = name.clone();
+            Expr::Named(ref name) => {
                 format!("Named({name})")
             }
             Expr::Call {
