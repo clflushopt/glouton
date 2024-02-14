@@ -126,7 +126,7 @@ impl SymbolTable {
     }
 
     // Find a symbol by starting from the given index, the index should be in
-    // the range of symbol tables stack..
+    // the range of symbol tables stack.
     fn find(&self, name: &str, start: usize) -> Option<&Symbol> {
         // Get a reference to the current scope we're processing
         let mut idx = start;
@@ -155,6 +155,7 @@ impl SymbolTable {
     // When `name` is already bound, binding fails.
     pub fn bind(&mut self, name: &str, sym: Symbol) {
         let tbl = &mut self.tables[self.current];
+
         match tbl.get(name) {
             Some(_) => {
                 unreachable!("Name {name} is already bound to {sym}")
@@ -194,6 +195,7 @@ impl SymbolTable {
             sym_count += self.tables[idx].len();
             idx -= 1;
         }
+
         sym_count
     }
 

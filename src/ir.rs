@@ -617,6 +617,7 @@ mod tests {
                     .expect("expected test case source to be valid");
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
+
                 let mut irgen = IRGenerator::new(parser.ast());
                 irgen.gen();
 
