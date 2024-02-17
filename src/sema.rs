@@ -1,76 +1,52 @@
-//! Glouton semantic analyzhhr implementation.
+//! Glouton semantic analyzer implementation.
 //!
 //! The semantic analyzer implements several passes on the AST to ensure type
-//! correctness, reference correctness and overall soundness.
-use std::{collections::HashMap, fmt, hash::Hash};
+//! correctess, reference correctness and overall soundness.
+use std::{any::Any, collections::HashMap, fmt, hash::Hash};
 
 use crate::ast::{self, DeclType, Expr, Stmt};
 
-/// Scope of a symbol.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Scope is used to localize the symbol table scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Scope {
     Local,
     Global,
-    Argument,
 }
 
-impl fmt::Display for Scope {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Local => write!(f, "LOCAL"),
-            Self::Global => write!(f, "GLOBAL"),
-            Self::Argument => write!(f, "ARGUMENT"),
-        }
-    }
-}
-
-/// Symbol kind, function or variable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Kind {
-    Variable,
-    Function,
-}
-
-impl fmt::Display for Kind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Function => write!(f, "FUNCTION"),
-            Self::Variable => write!(f, "VARIABLE"),
-        }
-    }
-}
-
-/// Symbol in the AST represented as a tuple of `Name`, a `Scope`, `Kind`
-/// and `Type`.  Each symbol is assigned a positional value which is used
-/// to derive its ordinal position in an activation record.
+/// Symbols in the AST are defined by their scope i.e argument, local or global
+/// their and kind i.e a variable or function.
+///
+/// Each symbol holds the name and declaration type of the definition it refers
+/// to, local variable symbols also have a `position` field that encodes their
+/// ordinal position in the activation record.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Symbol {
-    name: String,
-    t: DeclType,
-    scope: Scope,
-    kind: Kind,
-    ord: usize,
+pub enum Symbol {
+    LocalVariable {
+        name: String,
+        t: DeclType,
+        position: usize,
+    },
+    GlobalVariable {
+        name: String,
+        t: DeclType,
+    },
+    FunctionArgument {
+        name: String,
+        t: DeclType,
+    },
+    FunctionDefinition {
+        name: String,
+        t: DeclType,
+    },
 }
 
 impl fmt::Display for Symbol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Symbol({}, {}, {}, {})",
-            self.name, self.t, self.scope, self.kind
-        )
-    }
-}
-
-impl Symbol {
-    // Create a new symbol.
-    fn new(name: &str, t: DeclType, scope: Scope, kind: Kind, ord: usize) -> Self {
-        Self {
-            name: name.to_string(),
-            t,
-            scope,
-            kind,
-            ord,
+        match &self {
+            Self::LocalVariable { name, t, .. } => write!(f, "LOCAL({}): {}", name, t),
+            Self::GlobalVariable { name, t } => write!(f, "GLOBAL({}): {}", name, t),
+            Self::FunctionArgument { name, t } => write!(f, "ARG({}): {}", name, t),
+            Self::FunctionDefinition { name, t } => write!(f, "FUNCTION({}): {}", name, t),
         }
     }
 }
@@ -248,14 +224,22 @@ impl<'a> Analyzer<'a> {
             Stmt::VarDecl {
                 decl_type, name, ..
             } => {
-                let scope = self.scope();
-                let position = match scope {
-                    Scope::Local => self.table.stack_position(),
-                    _ => 0,
-                };
-                let sym = Symbol::new(name, *decl_type, scope, Kind::Variable, position);
-                self.table.bind(name, sym)
                 // TODO: Ensure r-value type matches l-value declared type.
+                let symbol = match self.scope() {
+                    Scope::Local => {
+                        let position = self.table.stack_position();
+                        Symbol::LocalVariable {
+                            name: name.clone(),
+                            t: *decl_type,
+                            position,
+                        }
+                    }
+                    Scope::Global => Symbol::GlobalVariable {
+                        name: name.clone(),
+                        t: *decl_type,
+                    },
+                };
+                self.table.bind(name, symbol)
             }
             Stmt::FuncDecl {
                 name,
@@ -263,30 +247,31 @@ impl<'a> Analyzer<'a> {
                 args,
                 ..
             } => {
-                // Bind the function name.
-                let scope = self.scope();
-                if self.scope() == Scope::Local {
-                    unreachable!("function declarations not allowed in local scope")
-                }
-                let sym = Symbol::new(name, *return_type, scope, Kind::Function, 0);
-                self.table.bind(name, sym);
-                // Bind arguments.
-                for arg in args {
-                    match self.ast.get_stmt(*arg) {
-                        Some(Stmt::FuncArg { decl_type, name }) => {
-                            let sym = Symbol::new(
-                                &name,
-                                *decl_type,
-                                Scope::Argument,
-                                Kind::Variable,
-                                self.table.stack_position(),
-                            );
-                            self.table.bind(name, sym)
-                        }
-                        arg @ _ => unreachable!(
-                            "unxpected statement kind, expected function argument got {:?}",
-                            arg
-                        ),
+                match self.scope() {
+                    Scope::Local => {
+                        unreachable!("function declarations are not allowed in a local scope")
+                    }
+                    Scope::Global => {
+                        // Bind the function definition.
+                        let func_symbol = Symbol::FunctionDefinition {
+                            name: name.clone(),
+                            t: *return_type,
+                        };
+                        self.table.bind(name, func_symbol);
+                        // Bind the function arguments.
+                        let _ = args.iter().for_each(|arg_ref| {
+                            let arg_symbol = match self.ast.get_stmt(*arg_ref) {
+                                Some(Stmt::FuncArg { decl_type, name }) => {
+                                    Symbol::FunctionArgument {
+                                        name: name.clone(),
+                                        t: *decl_type,
+                                    }
+                                }
+                                _ => unreachable!("expected function argument"),
+                            };
+
+                            self.table.bind(name, arg_symbol)
+                        });
                     }
                 }
             }
