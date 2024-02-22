@@ -189,6 +189,19 @@ type ExprPool = NodePool<Expr, ExprRef>;
 /// `StmtPool` is a node pool that holds `Stmt` nodes.
 type StmtPool = NodePool<Stmt, StmtRef>;
 
+// `SymbolPool` is a pool of source code symbols i.e identifiers used for  
+// string interning. The lifecycle of the `SymbolPool` is similar to that
+// of the `ast` and since we repeatedly deal with strings in compilers e.g
+// parsing, semantic analysis... this optimization allows us to reduce the
+// number of allocations, make comparisons O(1) and only build a the string
+// index once (during parsing).
+//
+// Inspired by LLVM IdentifierTable, matklad's interner implementation, Sorbet.
+#[derive(Default)]
+pub struct SymbolPool {
+
+}
+
 /// Binary operators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOperator {

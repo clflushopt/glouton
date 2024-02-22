@@ -1,8 +1,12 @@
-//! Glouton semantic analyzer implementation.
+//! Glouton semantic analysis implementation.
 //!
-//! The semantic analyzer implements several passes on the AST to ensure type
-//! correctess, reference correctness and overall soundness.
-use std::{any::Any, collections::HashMap, fmt, hash::Hash};
+//! Semantic analysis follows the C0 rules and walks the AST to build a symbol
+//! table which is used to ensure the validity and soundness of the source code.
+//!
+//! The first pass over the AST builds a symbol table and ensures that all
+//! referenced symbols have been declared before being used. Another second pass
+//! is used to type check the declarations and assignments.
+use std::{collections::HashMap, fmt};
 
 use crate::ast::{self, DeclType, Expr, Stmt};
 
@@ -13,12 +17,8 @@ enum Scope {
     Global,
 }
 
-/// Symbols in the AST are defined by their scope i.e argument, local or global
-/// their and kind i.e a variable or function.
-///
-/// Each symbol holds the name and declaration type of the definition it refers
-/// to, local variable symbols also have a `position` field that encodes their
-/// ordinal position in the activation record.
+/// Symbols bind names from declarations and identifiers to attributes such as
+/// type or ordinal position in the declaration stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Symbol {
     LocalVariable {
@@ -52,8 +52,8 @@ impl fmt::Display for Symbol {
 }
 
 /// The symbol table is responsible for tracking all declarations in effect
-/// when a reference to a symbol is encountered and responsible for recording
-/// all declared symbols.
+/// when a reference to a symbol is encountered. It's built by walking the AST
+/// and recording all variable and function declarations.
 ///
 /// `SymbolTable` is implemented as a stack of hash maps, a stack pointer is
 /// always pointing to a `HashMap` that holds all declarations within a scope
@@ -62,9 +62,6 @@ impl fmt::Display for Symbol {
 /// In order to simplify most operations we use three stack pointers, a root
 /// stack pointer which is immutable and points to the global scope, a pointer
 /// to the current scope and a pointer to the parent of the current scope.
-///
-/// This always us to walk the stack backwards when resolving symbols acting
-/// like a linked list.
 #[derive(Debug)]
 struct SymbolTable {
     // Stack pointer to the global scope.
@@ -84,7 +81,7 @@ impl SymbolTable {
             root: 0,
             current: 0,
             parent: 0,
-            tables: Vec::new(),
+            tables: vec![HashMap::new()],
         }
     }
 
@@ -92,13 +89,6 @@ impl SymbolTable {
     #[must_use]
     pub fn resolve(&self, name: &str) -> Option<&Symbol> {
         self.find(name, self.current)
-    }
-
-    // Checks if a symbol exists in the table, used to mainly for checking
-    // semantic correctness in test cases.
-    #[must_use]
-    pub fn exists(&self, name: &str) -> Option<&Symbol> {
-        self.find(name, self.tables.len() - 1)
     }
 
     // Find a symbol by starting from the given index, the index should be in
@@ -142,7 +132,7 @@ impl SymbolTable {
         }
     }
 
-    // Returns a view of the symbol tables.
+    // Returns an immutable view of the symbol tables.
     const fn tables(&self) -> &Vec<HashMap<String, Symbol>> {
         &self.tables
     }
@@ -192,14 +182,17 @@ impl SymbolTable {
     }
 }
 
-/// Analyzer implements an AST visitor responsible for analysing the AST and
-/// ensuring its semantic correctness.
-pub struct Analyzer<'a> {
+/// Declaration analyzer is a specialized visitor invoked for processing
+/// declarations. It is responsible for building the symbol table information
+/// corresponding to variable name, function names, types...
+pub struct DeclAnalyzer<'a> {
+    // AST to analyze.
     ast: &'a ast::AST,
+    // Constructed symbol table.
     table: SymbolTable,
 }
 
-impl<'a> Analyzer<'a> {
+impl<'a> DeclAnalyzer<'a> {
     /// Create a new `Analyzer` instance.
     pub fn new(ast: &'a ast::AST) -> Self {
         Self {
@@ -208,8 +201,7 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// Get the expected scope of a symbol given our index in the symbol
-    /// table stack.
+    /// Return whether we are in a local or global scope.
     #[must_use]
     const fn scope(&self) -> Scope {
         match self.table.scope() {
@@ -218,7 +210,12 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// Define a new binding given a declaration.
+    /// Return an immutable view to the symbol table.
+    const fn symbol_table(&self) -> &SymbolTable {
+        &self.table
+    }
+
+    /// Define a new binding given a variable or function declaration.
     fn define(&mut self, stmt: &ast::Stmt) {
         match stmt {
             Stmt::VarDecl {
@@ -285,6 +282,115 @@ impl<'a> Analyzer<'a> {
         self.table.resolve(name)
     }
 
+    /// Run semantic analysis pass on the given AST.
+    pub fn run(&mut self) {
+        ast::visit(self.ast, self)
+    }
+
+    /// Resolve the type of an expression, the type system we implement
+    /// is very simple and enforces the following rules.
+    /// - Values can only be assigned to variables of the same type.
+    /// - Function parameters can only accept a value of the same type.
+    /// - Return statements bind to the type of the returned values, the type must
+    /// match the return type of the function.
+    /// - All binary operators must have the same type on the lhs and rhs.
+    /// - The equality operators can be applied to any type except `Void`
+    /// and `Function` and always return a boolean.
+    /// - The comparison operators can only be applied to integer values
+    /// and always return boolean.
+    /// - The boolean operators (!, ||, &&) can only be applied to boolean
+    /// values and always return boolean.
+    /// - The arithmetic operators can only be applied to integer values
+    /// and always return an integer..
+    fn typecheck(&self, expr: &ast::Expr) {}
+}
+
+/// `ast::Visitor` implementation for `DeclAnalyzer` processes only declarations
+/// by effectively creating bindings and does nothing for the rest of AST nodes.
+impl<'a> ast::Visitor<()> for DeclAnalyzer<'a> {
+    fn visit_expr(&mut self, expr: &Expr) -> () {
+        match expr {
+            _ => (),
+        }
+    }
+
+    fn visit_stmt(&mut self, stmt: &Stmt) -> () {
+        match stmt {
+            decl @ (Stmt::VarDecl { .. } | Stmt::FuncArg { .. }) => self.define(decl),
+            func_decl @ Stmt::FuncDecl { body, .. } => {
+                // Process the function declaration.
+                self.define(func_decl);
+                // Process the function body.
+                if let Some(body) = self.ast.get_stmt(*body) {
+                    self.visit_stmt(body)
+                }
+            }
+            Stmt::Block(body) => {
+                self.table.enter();
+                for stmt_ref in body {
+                    if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
+                        self.visit_stmt(stmt)
+                    }
+                }
+                self.table.exit();
+            }
+            Stmt::If(.., body_ref, Some(else_ref)) => {
+                if let Some(stmt) = self.ast.get_stmt(*body_ref) {
+                    self.visit_stmt(stmt)
+                }
+                if let Some(stmt) = self.ast.get_stmt(*else_ref) {
+                    self.visit_stmt(stmt)
+                }
+            }
+            Stmt::For(.., stmt_ref) => {
+                if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
+                    self.visit_stmt(stmt)
+                }
+            }
+            Stmt::While(.., Some(stmt_ref)) => {
+                if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
+                    self.visit_stmt(stmt)
+                }
+            }
+            _ => (),
+        }
+    }
+}
+
+/// Semantics analyzer is a top level visitor for processing declarations
+/// and doing smenatic checking on AST nodes.
+struct SemanticsAnalyzer<'a> {
+    ast: &'a ast::AST,
+    symbol_table: &'a SymbolTable,
+    current_scope: usize,
+}
+
+impl<'a> SemanticsAnalyzer<'a> {
+    pub fn new(ast: &'a ast::AST, symbol_table: &'a SymbolTable) -> Self {
+        Self {
+            ast,
+            symbol_table,
+            current_scope: 0,
+        }
+    }
+
+    /// Lookup an existing binding by name, returns a `Symbol`
+    /// if one is found otherwise none.
+    fn lookup(&self, name: &str) -> Option<&Symbol> {
+        self.symbol_table.resolve(name)
+    }
+    /// Enter a new scope by increment the current scope pointer.
+    fn enter_scope(&mut self) {
+        self.current_scope += 1
+    }
+
+    /// Exit the current scope, decrementing the current scope pointer.
+    fn exit_scope(&mut self) {
+        if self.current_scope > 0 {
+            self.current_scope -= 1
+        }
+    }
+
     /// Resolve an expression to check if it was properly defined.
     pub fn resolve(&self, expr: &ast::Expr) {
         match expr {
@@ -330,60 +436,6 @@ impl<'a> Analyzer<'a> {
             ast::Expr::IntLiteral(_) | ast::Expr::BoolLiteral(_) | ast::Expr::CharLiteral(_) => (),
         }
     }
-
-    /// Core analysis routine, builds the symbol table and collect semantic
-    /// errors to display later.
-    fn analyze(&mut self, stmt: &ast::Stmt) {
-        match stmt {
-            Stmt::VarDecl {
-                decl_type,
-                name,
-                value,
-            } => {
-                // Check if the symbol has been defined before.
-                if self.lookup(name).is_some() {
-                    panic!("symbol {name} is already defined")
-                }
-                // Typecheck that `value` has type `decl_type`.
-            }
-            _ => todo!("unimplemented `analyze`"),
-        }
-    }
-
-    /// Run semantic analysis pass on the given AST.
-    pub fn run(&mut self, ast: &Vec<ast::Stmt>) {
-        for stmt in ast {
-            self.analyze(stmt);
-        }
-    }
-
-    /// Resolve the type of an expression, the type system we implement
-    /// is very simple and enforces the following rules.
-    /// - Values can only be assigned to variables of the same type.
-    /// - Function parameters can only accept a value of the same type.
-    /// - Return statements bind to the type of the returned values, the type must
-    /// match the return type of the function.
-    /// - All binary operators must have the same type on the lhs and rhs.
-    /// - The equality operators can be applied to any type except `Void`
-    /// and `Function` and always return a boolean.
-    /// - The comparison operators can only be applied to integer values
-    /// and always return boolean.
-    /// - The boolean operators (!, ||, &&) can only be applied to boolean
-    /// values and always return boolean.
-    /// - The arithmetic operators can only be applied to integer values
-    /// and always return an integer..
-    fn typecheck(&self, expr: &ast::Expr) {}
-}
-
-impl<'a> ast::Visitor<()> for Analyzer<'a> {
-    fn visit_expr(&mut self, expr: &Expr) -> () {
-        match expr {
-            Expr::Named(identifier) => todo!("validate that identifier exists in the symbol table"),
-            _ => todo!("unimplemented semantic analysis for expr {:?}", expr),
-        }
-    }
-
-    fn visit_stmt(&mut self, stmt: &Stmt) -> () {}
 }
 
 /// TypeChecker implements an AST visitor responsible for ensuring the type
@@ -425,4 +477,46 @@ impl<'a> ast::Visitor<()> for TypeChecker<'a> {
             _ => todo!("Unimplemented type checking pass for statement {:?}", stmt),
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::parser::Parser;
+    use crate::scanner::Scanner;
+    use crate::sema::DeclAnalyzer;
+
+    // Macro to generate test cases.
+    macro_rules! test_decl_analyzer {
+        ($name:ident, $source:expr ) => {
+            #[test]
+            fn $name() {
+                let source = $source;
+                let mut scanner = Scanner::new(source);
+                let tokens = scanner
+                    .scan()
+                    .expect("expected test case source to be valid");
+                let mut parser = Parser::new(&tokens);
+                parser.parse();
+
+                let mut decl_analyzer = DeclAnalyzer::new(parser.ast());
+                decl_analyzer.run();
+
+                for table in decl_analyzer.symbol_table().tables() {
+                    for (name, symbol) in table {
+                        println!("{} => {}", name, symbol);
+                    }
+                }
+            }
+        };
+    }
+
+    test_decl_analyzer!(
+        can_process_single_declarations,
+        "int main() { int a = 0; return a;}"
+    );
+
+    test_decl_analyzer!(
+        can_process_multiple_declarations_single_scope,
+        "int main() { int a = 0; int b = a; int c = b; int d = 1337; }"
+    );
 }
