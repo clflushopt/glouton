@@ -220,7 +220,7 @@ impl<'a> DeclAnalyzer<'a> {
     /// Define a new binding given a variable or function declaration.
     fn define(&mut self, stmt: &ast::Stmt) {
         match stmt {
-            Stmt::VarDecl {
+            Stmt::LocalVar {
                 decl_type, name, ..
             } => {
                 // TODO: Ensure r-value type matches l-value declared type.
@@ -311,7 +311,7 @@ impl<'a> ast::Visitor<()> for DeclAnalyzer<'a> {
 
     fn visit_stmt(&mut self, stmt: &Stmt) -> () {
         match stmt {
-            decl @ (Stmt::VarDecl { .. } | Stmt::FuncArg { .. }) => self.define(decl),
+            decl @ (Stmt::LocalVar { .. } | Stmt::FuncArg { .. }) => self.define(decl),
             func_decl @ Stmt::FuncDecl { args, body, .. } => {
                 // Process the function declaration.
                 self.define(func_decl);

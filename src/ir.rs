@@ -558,7 +558,7 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                 self.exit()
             }
             // Variable declaration are
-            ast::Stmt::VarDecl {
+            ast::Stmt::LocalVar {
                 decl_type,
                 name,
                 value,

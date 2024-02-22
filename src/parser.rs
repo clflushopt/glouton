@@ -133,7 +133,7 @@ impl Parser {
                 let assigned = decl_type.default_value();
                 let assigned_ref = self.ast.push_expr(assigned);
                 // Declaration without an assignment.
-                Stmt::VarDecl {
+                Stmt::LocalVar {
                     decl_type,
                     name: identifier,
                     value: assigned_ref,
@@ -144,7 +144,7 @@ impl Parser {
                 self.eat(&Token::Equal);
                 let assigned = self.expression();
                 self.eat(&Token::SemiColon);
-                Stmt::VarDecl {
+                Stmt::LocalVar {
                     decl_type,
                     name: identifier,
                     value: assigned,
