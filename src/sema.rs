@@ -43,7 +43,9 @@ pub enum Symbol {
 impl fmt::Display for Symbol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
-            Self::LocalVariable { name, t, .. } => write!(f, "LOCAL({}): {}", name, t),
+            Self::LocalVariable { name, t, position } => {
+                write!(f, "LOCAL({}): {} @ {position}", name, t)
+            }
             Self::GlobalVariable { name, t } => write!(f, "GLOBAL({}): {}", name, t),
             Self::FunctionArgument { name, t } => write!(f, "ARG({}): {}", name, t),
             Self::FunctionDefinition { name, t } => write!(f, "FUNCTION({}): {}", name, t),
@@ -238,11 +240,18 @@ impl<'a> DeclAnalyzer<'a> {
                 };
                 self.table.bind(name, symbol)
             }
+            Stmt::FuncArg { decl_type, name } => {
+                let symbol = match self.scope() {
+                    Scope::Local => Symbol::FunctionArgument {
+                        name: name.clone(),
+                        t: *decl_type,
+                    },
+                    Scope::Global => unreachable!("Function arguments must be in a local scope"),
+                };
+                self.table.bind(name, symbol)
+            }
             Stmt::FuncDecl {
-                name,
-                return_type,
-                args,
-                ..
+                name, return_type, ..
             } => {
                 match self.scope() {
                     Scope::Local => {
@@ -255,20 +264,6 @@ impl<'a> DeclAnalyzer<'a> {
                             t: *return_type,
                         };
                         self.table.bind(name, func_symbol);
-                        // Bind the function arguments.
-                        let _ = args.iter().for_each(|arg_ref| {
-                            let arg_symbol = match self.ast.get_stmt(*arg_ref) {
-                                Some(Stmt::FuncArg { decl_type, name }) => {
-                                    Symbol::FunctionArgument {
-                                        name: name.clone(),
-                                        t: *decl_type,
-                                    }
-                                }
-                                _ => unreachable!("expected function argument"),
-                            };
-
-                            self.table.bind(name, arg_symbol)
-                        });
                     }
                 }
             }
@@ -317,13 +312,30 @@ impl<'a> ast::Visitor<()> for DeclAnalyzer<'a> {
     fn visit_stmt(&mut self, stmt: &Stmt) -> () {
         match stmt {
             decl @ (Stmt::VarDecl { .. } | Stmt::FuncArg { .. }) => self.define(decl),
-            func_decl @ Stmt::FuncDecl { body, .. } => {
+            func_decl @ Stmt::FuncDecl { args, body, .. } => {
                 // Process the function declaration.
                 self.define(func_decl);
-                // Process the function body.
-                if let Some(body) = self.ast.get_stmt(*body) {
-                    self.visit_stmt(body)
+                // Enter the local scope and process the arguments and body.
+                self.table.enter();
+                for arg_ref in args {
+                    if let Some(arg) = self.ast.get_stmt(*arg_ref) {
+                        self.define(arg);
+                    }
                 }
+                if let Some(func_body) = self.ast.get_stmt(*body) {
+                    match func_body {
+                        Stmt::Block(body) => {
+                            for stmt_ref in body {
+                                if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
+                                    self.visit_stmt(stmt)
+                                }
+                            }
+                        }
+                        _ => unreachable!("function body must be a block statement"),
+                    }
+                }
+                // Exit the function scope.
+                self.table.exit();
             }
             Stmt::Block(body) => {
                 self.table.enter();
@@ -501,7 +513,8 @@ mod tests {
                 let mut decl_analyzer = DeclAnalyzer::new(parser.ast());
                 decl_analyzer.run();
 
-                for table in decl_analyzer.symbol_table().tables() {
+                for (ii, table) in decl_analyzer.symbol_table().tables().iter().enumerate() {
+                    println!("Scope @ {}", ii);
                     for (name, symbol) in table {
                         println!("{} => {}", name, symbol);
                     }
@@ -518,5 +531,15 @@ mod tests {
     test_decl_analyzer!(
         can_process_multiple_declarations_single_scope,
         "int main() { int a = 0; int b = a; int c = b; int d = 1337; }"
+    );
+
+    test_decl_analyzer!(
+        can_process_multiple_declarations_nested_scopes,
+        "int main() { int a = 0; { int b = a; }  int c = b; int d = 1337;  }"
+    );
+
+    test_decl_analyzer!(
+        can_process_declarations_with_arguments,
+        "int main(int a, int b, int c) { int d = b; { int a = c; } }"
     );
 }
