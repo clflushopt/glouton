@@ -8,7 +8,7 @@
 //! is used to type check the declarations and assignments.
 use std::{collections::HashMap, fmt};
 
-use crate::ast::{self, DeclType, Expr, Stmt};
+use crate::ast::{self, Decl, DeclType, Expr, Stmt};
 
 /// Scope is used to localize the symbol table scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,8 +217,8 @@ impl<'a> DeclAnalyzer<'a> {
         &self.table
     }
 
-    /// Define a new binding given a variable or function declaration.
-    fn define(&mut self, stmt: &ast::Stmt) {
+    /// Define a local binding.
+    fn define_local_binding(&mut self, stmt: &ast::Stmt) {
         match stmt {
             Stmt::LocalVar {
                 decl_type, name, ..
@@ -250,7 +250,14 @@ impl<'a> DeclAnalyzer<'a> {
                 };
                 self.table.bind(name, symbol)
             }
-            Stmt::FuncDecl {
+            _ => unreachable!("unexpected binding : {:?}", stmt),
+        }
+    }
+
+    /// Define a new global binding given a variable or function declaration.
+    fn define_global_binding(&mut self, decl: &ast::Decl) {
+        match decl {
+            Decl::Function {
                 name, return_type, ..
             } => {
                 match self.scope() {
@@ -267,7 +274,19 @@ impl<'a> DeclAnalyzer<'a> {
                     }
                 }
             }
-            _ => unreachable!("unexpected `define` for {:?}", stmt),
+            Decl::GlobalVar {
+                decl_type, name, ..
+            } => {
+                // TODO: Ensure r-value type matches l-value declared type.
+                let symbol = match self.scope() {
+                    Scope::Global => Symbol::GlobalVariable {
+                        name: name.clone(),
+                        t: *decl_type,
+                    },
+                    _ => unreachable!("unexpected state: trying to define global variable in local scope {:?} @ {:?}", decl, self.scope())
+                };
+                self.table.bind(name, symbol)
+            }
         }
     }
 
@@ -303,23 +322,16 @@ impl<'a> DeclAnalyzer<'a> {
 /// `ast::Visitor` implementation for `DeclAnalyzer` processes only declarations
 /// by effectively creating bindings and does nothing for the rest of AST nodes.
 impl<'a> ast::Visitor<()> for DeclAnalyzer<'a> {
-    fn visit_expr(&mut self, expr: &Expr) -> () {
-        match expr {
-            _ => (),
-        }
-    }
-
-    fn visit_stmt(&mut self, stmt: &Stmt) -> () {
-        match stmt {
-            decl @ (Stmt::LocalVar { .. } | Stmt::FuncArg { .. }) => self.define(decl),
-            func_decl @ Stmt::FuncDecl { args, body, .. } => {
+    fn visit_decl(&mut self, decl: &ast::Decl) {
+        match decl {
+            func_decl @ Decl::Function { args, body, .. } => {
                 // Process the function declaration.
-                self.define(func_decl);
+                self.define_global_binding(func_decl);
                 // Enter the local scope and process the arguments and body.
                 self.table.enter();
                 for arg_ref in args {
                     if let Some(arg) = self.ast.get_stmt(*arg_ref) {
-                        self.define(arg);
+                        self.define_local_binding(arg);
                     }
                 }
                 if let Some(func_body) = self.ast.get_stmt(*body) {
@@ -336,6 +348,20 @@ impl<'a> ast::Visitor<()> for DeclAnalyzer<'a> {
                 }
                 // Exit the function scope.
                 self.table.exit();
+            }
+            global_var @ Decl::GlobalVar { .. } => self.define_global_binding(global_var),
+        }
+    }
+    fn visit_expr(&mut self, expr: &Expr) {
+        match expr {
+            _ => (),
+        }
+    }
+
+    fn visit_stmt(&mut self, stmt: &Stmt) {
+        match stmt {
+            decl @ (Stmt::LocalVar { .. } | Stmt::FuncArg { .. }) => {
+                self.define_local_binding(decl)
             }
             Stmt::Block(body) => {
                 self.table.enter();
@@ -474,7 +500,8 @@ impl TypeChecker<'_> {
 }
 
 impl<'a> ast::Visitor<()> for TypeChecker<'a> {
-    fn visit_expr(&mut self, expr: &ast::Expr) -> () {
+    fn visit_decl(&mut self, decl: &ast::Decl) {}
+    fn visit_expr(&mut self, expr: &ast::Expr) {
         match expr {
             ast::Expr::UnaryOp { operator, operand } => match operator {
                 ast::UnaryOperator::Neg => {}
@@ -484,7 +511,7 @@ impl<'a> ast::Visitor<()> for TypeChecker<'a> {
         }
     }
 
-    fn visit_stmt(&mut self, stmt: &ast::Stmt) -> () {
+    fn visit_stmt(&mut self, stmt: &ast::Stmt) {
         match stmt {
             _ => todo!("Unimplemented type checking pass for statement {:?}", stmt),
         }

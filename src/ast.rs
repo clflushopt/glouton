@@ -98,7 +98,7 @@ use core::fmt;
 ///
 /// `Ref` trait allows us to restrict which types can be used as handles
 /// or node references.
-pub trait Ref {
+pub trait Ref: Sized {
     fn new(reference: usize) -> Self;
     fn get(&self) -> usize;
 }
@@ -180,18 +180,22 @@ pub struct ExprRefMarker;
 pub struct StmtRefMarker;
 /// `DeclRefMarker` is a phantom type marker for node references that reference
 /// declarations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeclRefMarker;
 
 /// `ExprRef` is a reference to an `Expr` node in the expression pool.
 pub type ExprRef = NodeRef<ExprRefMarker>;
 /// `StmtRef` is a reference to a `Stmt` node in the statements pool.
 pub type StmtRef = NodeRef<StmtRefMarker>;
 /// `DeclRef` is a reference to `Decl` node in the declarations pool.
+pub type DeclRef = NodeRef<DeclRefMarker>;
 
 /// `ExprPool` is a node pool that holds `Expr` nodes.
 type ExprPool = NodePool<Expr, ExprRef>;
 /// `StmtPool` is a node pool that holds `Stmt` nodes.
 type StmtPool = NodePool<Stmt, StmtRef>;
 /// `DeclPool` is a node pool for `Decl` nodes.
+type DeclPool = NodePool<Decl, DeclRef>;
 
 // `SymbolPool` is a pool of source code symbols i.e identifiers used for
 // string interning. The lifecycle of the `SymbolPool` is similar to that
@@ -339,13 +343,6 @@ pub enum Stmt {
         decl_type: DeclType,
         name: String,
     },
-    // Function declarations.
-    FuncDecl {
-        name: String,
-        return_type: DeclType,
-        args: Vec<StmtRef>,
-        body: StmtRef,
-    },
     // Expression statements.
     Expr(ExprRef),
     // Blocks are sequence of statements.
@@ -382,7 +379,7 @@ pub enum Decl {
 /// of tokens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AST {
-    declarations: StmtPool,
+    declarations: DeclPool,
     statements: StmtPool,
     expressions: ExprPool,
 }
@@ -394,12 +391,14 @@ pub trait Visitor<T> {
     fn visit_expr(&mut self, expr: &Expr) -> T;
     /// Visit a statement.
     fn visit_stmt(&mut self, stmt: &Stmt) -> T;
+    /// Visit a declaration.
+    fn visit_decl(&mut self, decl: &Decl) -> T;
 }
 
 /// Accept and run a visitor over an AST.
 pub fn visit<T>(ast: &AST, visitor: &'_ mut dyn Visitor<T>) {
     for decl in ast.declarations() {
-        visitor.visit_stmt(decl);
+        visitor.visit_decl(decl);
     }
 }
 
@@ -409,7 +408,7 @@ impl fmt::Display for AST {
         let mut displayer = ASTDisplayer::new(self);
         self.declarations()
             .iter()
-            .try_for_each(|decl| write!(f, "{}", displayer.visit_stmt(decl)))
+            .try_for_each(|decl| write!(f, "{}", displayer.visit_decl(decl)))
     }
 }
 
@@ -424,7 +423,7 @@ impl AST {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            declarations: StmtPool::new(),
+            declarations: DeclPool::new(),
             statements: StmtPool::new(),
             expressions: ExprPool::new(),
         }
@@ -432,7 +431,7 @@ impl AST {
 
     /// Return a non-mutable reference to the declaration pool.
     #[must_use]
-    pub const fn declarations(&self) -> &Vec<Stmt> {
+    pub const fn declarations(&self) -> &Vec<Decl> {
         &self.declarations.nodes
     }
 
@@ -449,7 +448,7 @@ impl AST {
     }
 
     /// Push a new declaration node to the AST returning a reference to it.
-    pub fn push_decl(&mut self, decl: Stmt) -> StmtRef {
+    pub fn push_decl(&mut self, decl: Decl) -> DeclRef {
         self.declarations.put(decl)
     }
 
@@ -466,7 +465,7 @@ impl AST {
     /// Fetches a declaration node by its reference, returning `None`
     /// if the declaration node deosn't exist.
     #[must_use]
-    pub fn get_decl(&self, decl_ref: StmtRef) -> Option<&Stmt> {
+    pub fn get_decl(&self, decl_ref: DeclRef) -> Option<&Decl> {
         self.declarations.get(decl_ref)
     }
 
@@ -486,11 +485,12 @@ impl AST {
 }
 
 /// `ASTDisplayer` walks the AST nodes and displays the individual expressions.
-struct ASTDisplayer<'a> {
+pub struct ASTDisplayer<'a> {
     ast: &'a AST,
 }
 
 impl<'a> ASTDisplayer<'a> {
+    #[must_use]
     pub const fn new(ast: &'a AST) -> Self {
         Self { ast }
     }
@@ -513,6 +513,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
             }
             &Expr::IntLiteral(value) => value.to_string(),
             &Expr::BoolLiteral(value) => value.to_string(),
+            &Expr::CharLiteral(value) => value.to_string(),
             &Expr::UnaryOp { operator, operand } => self.ast.get_expr(operand).map_or_else(
                 || unreachable!("unary node is missing operand"),
                 |operand| match operator {
@@ -601,12 +602,12 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
             } => {
                 if let Some(name) = self.ast.get_expr(*name_ref) {
                     let mut call_str = format!("Call({}, Args(", self.visit_expr(name));
-                    args.iter().for_each(|arg_ref| {
+                    for arg_ref in args.iter() {
                         if let Some(arg) = self.ast.get_expr(*arg_ref) {
                             let formatted_arg = self.visit_expr(arg);
                             call_str += &format!("{formatted_arg}, ");
                         }
-                    });
+                    }
                     call_str = call_str.trim_end_matches(", ").to_string();
                     call_str += "))";
                     call_str
@@ -614,7 +615,6 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                     unreachable!("expected call expression to have at least one named value")
                 }
             }
-            _ => todo!("Unimplemented display for Node {:?}", expr),
         }
     }
     /// Visit a statement and return its textual representation.
@@ -644,48 +644,19 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
             ),
             Stmt::Block(stmts) => {
                 let mut s = "Block {\n".to_string();
-                stmts.iter().for_each(|stmt_ref| {
+                for stmt_ref in stmts.iter() {
                     self.ast.get_stmt(*stmt_ref).map_or_else(
                         || unreachable!("Block is missing statement reference"),
                         |stmt| {
                             s += &format!("Stmt({}),\n", self.visit_stmt(stmt));
                         },
-                    )
-                });
+                    );
+                }
                 s += "}";
                 s
             }
             Stmt::FuncArg { decl_type, name } => {
                 format!("ARG({decl_type}, {name})")
-            }
-            Stmt::FuncDecl {
-                name,
-                return_type,
-                args,
-                body,
-            } => {
-                let mut args_str = String::new();
-                args.iter().for_each(|arg_ref| {
-                    if let Some(arg) = self.ast.get_stmt(*arg_ref) {
-                        let arg = self.visit_stmt(arg);
-                        args_str += &arg;
-                        args_str += ", ";
-                    }
-                });
-
-                args_str = args_str.trim_end_matches(", ").to_string();
-
-                let body = self
-                    .ast
-                    .get_stmt(*body)
-                    .map_or_else(|| unreachable!("function is missing body"), |body| body);
-                format!(
-                    "FUNCTION({}, {}, ARGS({}), {}",
-                    name,
-                    return_type,
-                    args_str,
-                    self.visit_stmt(body)
-                )
             }
             Stmt::If(condition_ref, then_ref, else_ref) => {
                 let cond = self.ast.get_expr(*condition_ref).map_or_else(
@@ -712,7 +683,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
             }
             Stmt::For(init_ref, cond_ref, iter_ref, body_ref) => {
                 let init = match init_ref {
-                    None => "".to_string(),
+                    None => String::new(),
                     Some(expr_ref) => self.ast.get_expr(*expr_ref).map_or_else(
                         || unreachable!("missing expression in `for` statement"),
                         |init_expr| self.visit_expr(init_expr),
@@ -720,7 +691,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 };
 
                 let cond = match cond_ref {
-                    None => "".to_string(),
+                    None => String::new(),
                     Some(expr_ref) => self.ast.get_expr(*expr_ref).map_or_else(
                         || unreachable!("missing expression in `for` statement"),
                         |cond_expr| self.visit_expr(cond_expr),
@@ -728,7 +699,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 };
 
                 let iter = match iter_ref {
-                    None => "".to_string(),
+                    None => String::new(),
                     Some(expr_ref) => self.ast.get_expr(*expr_ref).map_or_else(
                         || unreachable!("missing expression in `for` statement"),
                         |iter_expr| self.visit_expr(iter_expr),
@@ -746,6 +717,54 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 "empty statement is a temporary placeholder and should not be in the ast"
             ),
             _ => todo!("Unimplemented display trait for function declaration"),
+        }
+    }
+    /// Visit a declaration.
+    fn visit_decl(&mut self, decl: &Decl) -> String {
+        match decl {
+            Decl::Function {
+                name,
+                return_type,
+                args,
+                body,
+            } => {
+                let mut args_str = String::new();
+                for arg_ref in args.iter() {
+                    if let Some(arg) = self.ast.get_stmt(*arg_ref) {
+                        let arg = self.visit_stmt(arg);
+                        args_str += &arg;
+                        args_str += ", ";
+                    }
+                }
+
+                args_str = args_str.trim_end_matches(", ").to_string();
+
+                let body = self
+                    .ast
+                    .get_stmt(*body)
+                    .map_or_else(|| unreachable!("function is missing body"), |body| body);
+                format!(
+                    "FUNCTION({}, {}, ARGS({}), {}",
+                    name,
+                    return_type,
+                    args_str,
+                    self.visit_stmt(body)
+                )
+            }
+            Decl::GlobalVar {
+                decl_type,
+                name,
+                value,
+            } => {
+                let mut s = format!("VAR({decl_type}, {name}");
+                self.ast.get_expr(*value).map_or_else(
+                    || unreachable!("Missing expression in assignment"),
+                    |expr| {
+                        s += &format!(", {})", self.visit_expr(expr));
+                    },
+                );
+                s
+            }
         }
     }
 }

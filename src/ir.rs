@@ -7,7 +7,7 @@
 //! and effect based operations which take operands and produce no values.
 use core::fmt;
 
-use crate::ast::{self, Visitor};
+use crate::ast;
 
 /// Types used in the IR.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -520,12 +520,12 @@ impl<'a> IRGenerator<'a> {
 }
 
 impl<'a> ast::Visitor<()> for IRGenerator<'a> {
-    fn visit_stmt(&mut self, stmt: &ast::Stmt) {
-        match stmt {
+    fn visit_decl(&mut self, decl: &ast::Decl) {
+        match decl {
             // Function declarations are the only place where we need to switch
             // scopes explicitely, since the scope only affects where variable
             // declarations are positioned.
-            ast::Stmt::FuncDecl {
+            ast::Decl::Function {
                 name,
                 return_type,
                 args,
@@ -557,6 +557,11 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                 // Exit back to the global scope.
                 self.exit()
             }
+            ast::Decl::GlobalVar { .. } => {}
+        }
+    }
+    fn visit_stmt(&mut self, stmt: &ast::Stmt) {
+        match stmt {
             // Variable declaration are
             ast::Stmt::LocalVar {
                 decl_type,

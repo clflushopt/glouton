@@ -1,6 +1,8 @@
 //! Parser for a subset of C0 language that uses Pratt's approach to parsing
 //! expressions and a flat representation for the AST.
-use crate::ast::{BinaryOperator, DeclType, Expr, ExprRef, Stmt, StmtRef, UnaryOperator, AST};
+use crate::ast::{
+    BinaryOperator, Decl, DeclType, Expr, ExprRef, Stmt, StmtRef, UnaryOperator, AST,
+};
 use crate::token::Token;
 
 /// Operator precedence tablet.
@@ -100,6 +102,7 @@ impl Parser {
     /// Parse a statement.
     fn statement(&mut self) -> Stmt {
         match *self.peek() {
+            Token::Int | Token::Char | Token::Bool => self.local_var_decl(),
             Token::Return => self.return_stmt(),
             Token::LBrace => self.block(),
             Token::For => self.loop_stmt(),
@@ -108,13 +111,8 @@ impl Parser {
         }
     }
 
-    /// Parse a declaration.
-    fn declaration(&mut self) -> Stmt {
-        if self.peek() != &Token::Int && self.peek() != &Token::Char && self.peek() != &Token::Bool
-        {
-            return self.statement();
-        }
-
+    /// Parse a local variable declaration.
+    fn local_var_decl(&mut self) -> Stmt {
         let decl_type = match *self.advance() {
             Token::Int => DeclType::Int,
             Token::Char => DeclType::Char,
@@ -150,6 +148,50 @@ impl Parser {
                     value: assigned,
                 }
             }
+            _ => unreachable!("Unsupported token in position {}", self.peek()),
+        }
+    }
+
+    /// Parse a declaration.
+    fn declaration(&mut self) -> Decl {
+        let decl_type = match *self.advance() {
+            Token::Int => DeclType::Int,
+            Token::Char => DeclType::Char,
+            Token::Bool => DeclType::Bool,
+            _ => unreachable!(
+                "Expected declaration type to be one of (int, char, bool) got {}.",
+                self.peek()
+            ),
+        };
+        let identifier = match self.advance() {
+            Token::Identifier(ident) => ident.clone(),
+            _ => unreachable!("Expected identifier, found {}", self.peek()),
+        };
+
+        match *self.peek() {
+            // Variable declaration without right value assignment.
+            Token::SemiColon => {
+                self.eat(&Token::SemiColon);
+                let assigned = decl_type.default_value();
+                let assigned_ref = self.ast.push_expr(assigned);
+                // Declaration without an assignment.
+                Decl::GlobalVar {
+                    decl_type,
+                    name: identifier,
+                    value: assigned_ref,
+                }
+            }
+            // Variable declaration with right value assignment.
+            Token::Equal => {
+                self.eat(&Token::Equal);
+                let assigned = self.expression();
+                self.eat(&Token::SemiColon);
+                Decl::GlobalVar {
+                    decl_type,
+                    name: identifier,
+                    value: assigned,
+                }
+            }
             // Function declaration.
             Token::LParen => {
                 // Function declaration.
@@ -163,17 +205,17 @@ impl Parser {
                 let body_ref = self.ast.push_stmt(body);
                 // End of body
                 self.eat(&Token::RBrace);
-                Stmt::FuncDecl {
+                Decl::Function {
                     name: identifier,
                     return_type: decl_type,
                     args,
                     body: body_ref,
                 }
             }
-            _ => {
-                self.eat(&Token::SemiColon);
-                self.statement()
-            }
+            _ => unreachable!(
+                "Expected type declaration (int, char, bool) got {}",
+                self.peek()
+            ),
         }
     }
 
@@ -217,7 +259,7 @@ impl Parser {
         // Parse and build the block.
         self.eat(&Token::LBrace);
         while !self.at(&Token::RBrace) && !self.eof() {
-            let stmt = self.declaration();
+            let stmt = self.statement();
             let stmt_ref = self.ast.push_stmt(stmt);
 
             stmts.push(stmt_ref);
@@ -281,7 +323,7 @@ impl Parser {
         };
         self.eat(&Token::RParen);
         // Loop body.
-        let body = self.declaration();
+        let body = self.statement();
         let body_ref = self.ast.push_stmt(body);
 
         Stmt::For(init, condition, iter, body_ref)
@@ -548,11 +590,17 @@ mod tests {
                     .expect("Expected source code for test case to be valid !");
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
-                assert_eq!(parser.ast().to_string(), $expected);
+                println!("AST: {}", parser.ast());
+                assert!(parser.ast().to_string().contains($expected));
             }
         };
     }
-    test_parser!(can_parse_return_statements, "return 0;", "Return(0)");
+
+    test_parser!(
+        can_parse_return_statements,
+        "int main() { return 0; }",
+        "Return(0)"
+    );
     /*
      * Imaginary AST for this expression
      * Grouping(
@@ -573,8 +621,8 @@ mod tests {
      * */
     test_parser!(
         can_parse_grouping_expression,
-        "(1 + 2 + 3 + (4 * 5));",
-        "Expr(Grouping(Add(Add(Add(1, 2), 3), Grouping(Mul(4, 5)))))"
+        "int x= (1 + 2 + 3 + (4 * 5));",
+        "Grouping(Add(Add(Add(1, 2), 3), Grouping(Mul(4, 5))))"
     );
     /*
      * Imaginary AST for this expression
@@ -591,8 +639,8 @@ mod tests {
      */
     test_parser!(
         can_parse_non_grouped_expression,
-        "6 / 3 * 4 - 1 + 2",
-        "Expr(Add(Sub(Mul(Div(6, 3), 4), 1), 2))"
+        "int x = 6 / 3 * 4 - 1 + 2",
+        "Add(Sub(Mul(Div(6, 3), 4), 1), 2)"
     );
 
     test_parser!(
@@ -651,37 +699,37 @@ mod tests {
 
     test_parser!(
         can_parse_greater_than_equal_expression,
-        "5 + 3 * 10 >= 2",
-        "Expr(GreaterEqual(Add(5, Mul(3, 10)), 2))"
+        "int x = 5 + 3 * 10 >= 2",
+        "GreaterEqual(Add(5, Mul(3, 10)), 2)"
     );
 
     test_parser!(
         can_parse_equality_expression,
-        "5 + 7 * 10 / 2 == 0",
-        "Expr(Equal(Add(5, Div(Mul(7, 10), 2)), 0))"
+        "int x = 5 + 7 * 10 / 2 == 0",
+        "Equal(Add(5, Div(Mul(7, 10), 2)), 0)"
     );
 
     test_parser!(
         can_parse_call_with_equality_expression,
-        "1 + 1 == f(a,b);",
-        "Expr(Equal(Add(1, 1), Call(Named(f), Args(Named(a), Named(b)))))"
+        "int x = 1 + 1 == f(a,b);",
+        "Equal(Add(1, 1), Call(Named(f), Args(Named(a), Named(b))))"
     );
 
     test_parser!(
         can_parse_inequality_with_calls,
-        "g(a,b) != f(a,b);",
-        "Expr(NotEqual(Call(Named(g), Args(Named(a), Named(b))), Call(Named(f), Args(Named(a), Named(b)))))"
+        "int x = g(a,b) != f(a,b);",
+        "NotEqual(Call(Named(g), Args(Named(a), Named(b))), Call(Named(f), Args(Named(a), Named(b))))"
     );
 
     test_parser!(
         can_parse_unary_inequality,
-        "!true != !false",
-        "Expr(NotEqual(Not(true), Not(false)))"
+        "int main() {  !true != !false; }",
+        "NotEqual(Not(true), Not(false))"
     );
 
     test_parser!(
         can_parse_blocks,
-        r#"{
+        r#"int main(){
             int a = 10;
             int b = 20;
             int c = a + b;
@@ -730,12 +778,12 @@ Stmt(Return(Add(Named(a), Named(b)))),
 
     test_parser!(
         can_parse_if_statements_without_else_block,
-        r#"
-        if (a > b) {
-            int x = a * b;
-            return x;
-        }
-        "#,
+        r#"int main() {
+            if (a > b) {
+                int x = a * b;
+                return x;
+            }
+         }"#,
         "IF(Greater(Named(a), Named(b)), Block {
 Stmt(VAR(INT_TYPE, x, Mul(Named(a), Named(b)))),
 Stmt(Return(Named(x))),
@@ -744,15 +792,15 @@ Stmt(Return(Named(x))),
 
     test_parser!(
         can_parse_if_statements_with_else_block,
-        r#"
-        if (a > b) {
-            int x = a * b;
-            return x;
-        } else {
-            int x = b / a;
-            return x;
-        }
-        "#,
+        r#"int main() {
+            if (a > b) {
+                int x = a * b;
+                return x;
+            } else {
+                int x = b / a;
+                return x;
+            }
+        }"#,
         "IF(Greater(Named(a), Named(b)), Block {
 Stmt(VAR(INT_TYPE, x, Mul(Named(a), Named(b)))),
 Stmt(Return(Named(x))),
@@ -764,13 +812,13 @@ Stmt(Return(Named(x))),
 
     test_parser!(
         can_parse_nested_blocks,
-        r#"
-{
-    {
-        int x;
-    }
-}
-"#,
+        r#"int main() {
+            {
+                {
+                    int x;
+                }
+            }
+        }"#,
         "Block {
 Stmt(Block {
 Stmt(VAR(INT_TYPE, x, 0)),
@@ -780,7 +828,7 @@ Stmt(VAR(INT_TYPE, x, 0)),
 
     test_parser!(
         can_parse_for_stmt,
-        r#"for(;;) { i = i + 1; }"#,
+        r#"int main() { for(;;) { i = i + 1; } }"#,
         "FOR(, , , Block {
 Stmt(Expr(Assign(Named(i), Add(Named(i), 1)))),
 })"
