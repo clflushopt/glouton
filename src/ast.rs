@@ -348,11 +348,23 @@ pub enum Stmt {
     // Blocks are sequence of statements.
     Block(Vec<StmtRef>),
     // If statements.
-    If(ExprRef, StmtRef, Option<StmtRef>),
+    If {
+        condition: ExprRef,
+        then_block: StmtRef,
+        else_block: Option<StmtRef>,
+    },
     // For loops.
-    For(Option<ExprRef>, Option<ExprRef>, Option<ExprRef>, StmtRef),
+    For {
+        init: Option<ExprRef>,
+        condition: Option<ExprRef>,
+        iteration: Option<ExprRef>,
+        body: StmtRef,
+    },
     // While loops.
-    While(Option<ExprRef>, Option<StmtRef>),
+    While {
+        condition: Option<ExprRef>,
+        body: Option<StmtRef>,
+    },
     // Empty statement.
     Empty,
 }
@@ -658,7 +670,11 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
             Stmt::FuncArg { decl_type, name } => {
                 format!("ARG({decl_type}, {name})")
             }
-            Stmt::If(condition_ref, then_ref, else_ref) => {
+            Stmt::If {
+                condition: condition_ref,
+                then_block: then_ref,
+                else_block: else_ref,
+            } => {
                 let cond = self.ast.get_expr(*condition_ref).map_or_else(
                     || unreachable!("missing condition for if statement"),
                     |cond_expr| self.visit_expr(cond_expr),
@@ -681,7 +697,12 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                     None => format!("IF({cond}, {then_block})"),
                 }
             }
-            Stmt::For(init_ref, cond_ref, iter_ref, body_ref) => {
+            Stmt::For {
+                init: init_ref,
+                condition: cond_ref,
+                iteration: iter_ref,
+                body: body_ref,
+            } => {
                 let init = match init_ref {
                     None => String::new(),
                     Some(expr_ref) => self.ast.get_expr(*expr_ref).map_or_else(

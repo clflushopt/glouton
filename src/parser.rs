@@ -106,6 +106,7 @@ impl Parser {
             Token::Return => self.return_stmt(),
             Token::LBrace => self.block(),
             Token::For => self.loop_stmt(),
+            Token::While => unimplemented!("unimplemented parsing for while loops"),
             Token::If => self.if_stmt(),
             _ => self.expr_stmt(),
         }
@@ -241,7 +242,9 @@ impl Parser {
                     name: arg_name,
                 };
                 let arg_ref = self.ast.push_stmt(arg);
+                // Push the function argument statement to the AST.
                 args.push(arg_ref);
+                // We've reached the last argument, break.
                 if !self.expect(&Token::Comma) {
                     break;
                 }
@@ -275,15 +278,15 @@ impl Parser {
         // Opening parenthesis.
         self.eat(&Token::LParen);
         // Parse conditional expression.
-        let conditional = self.expression();
+        let condition = self.expression();
         // Closing parenthesis.
         self.eat(&Token::RParen);
         // Body of the conditional branch, maybe some day we will support next
         // line statements. For now, expect a brace.
         self.eat(&Token::LBrace);
         // Conditional block.
-        let body = self.block();
-        let body_ref = self.ast.push_stmt(body);
+        let then_block = self.block();
+        let then_block_ref = self.ast.push_stmt(then_block);
         match self.peek() {
             &Token::Else => {
                 // Consume else.
@@ -292,9 +295,17 @@ impl Parser {
                 let else_body = self.block();
                 let else_body_ref = self.ast.push_stmt(else_body);
                 self.eat(&Token::LBrace);
-                Stmt::If(conditional, body_ref, Some(else_body_ref))
+                Stmt::If {
+                    condition,
+                    then_block: then_block_ref,
+                    else_block: Some(else_body_ref),
+                }
             }
-            _ => Stmt::If(conditional, body_ref, None),
+            _ => Stmt::If {
+                condition,
+                then_block: then_block_ref,
+                else_block: None,
+            },
         }
     }
 
@@ -317,7 +328,7 @@ impl Parser {
         };
         self.eat(&Token::SemiColon);
         // Iteration expression.
-        let iter = match self.peek() {
+        let iteration = match self.peek() {
             &Token::RParen => None,
             _ => Some(self.expression()),
         };
@@ -325,8 +336,12 @@ impl Parser {
         // Loop body.
         let body = self.statement();
         let body_ref = self.ast.push_stmt(body);
-
-        Stmt::For(init, condition, iter, body_ref)
+        Stmt::For {
+            init,
+            condition,
+            iteration,
+            body: body_ref,
+        }
     }
 
     /// Parse a return statement.

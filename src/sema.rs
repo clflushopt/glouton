@@ -65,7 +65,7 @@ impl fmt::Display for Symbol {
 /// stack pointer which is immutable and points to the global scope, a pointer
 /// to the current scope and a pointer to the parent of the current scope.
 #[derive(Debug)]
-struct SymbolTable {
+pub struct SymbolTable {
     // Stack pointer to the global scope.
     root: usize,
     // Stack pointer to the current scope.
@@ -99,7 +99,7 @@ impl SymbolTable {
         // Get a reference to the current scope we're processing
         let mut idx = start;
         let mut current_scope_table = &self.tables[idx];
-        loop {
+        while idx >= self.root {
             // Try and find the declaration in the current scope.
             for (ident, symbol) in current_scope_table {
                 if ident == name {
@@ -108,12 +108,8 @@ impl SymbolTable {
             }
             // If we didn't find the declaration in the current scope
             // we check the parent.
-            if idx.checked_sub(1).is_some() {
-                idx -= 1;
-                current_scope_table = &self.tables[idx];
-            } else {
-                break;
-            }
+            idx -= 1;
+            current_scope_table = &self.tables[idx];
         }
         None
     }
@@ -290,33 +286,11 @@ impl<'a> DeclAnalyzer<'a> {
         }
     }
 
-    /// Lookup an existing binding by name, returns a `Symbol`
-    /// if one is found otherwise none.
-    fn lookup(&self, name: &str) -> Option<&Symbol> {
-        self.table.resolve(name)
-    }
-
     /// Run semantic analysis pass on the given AST.
-    pub fn run(&mut self) {
-        ast::visit(self.ast, self)
+    pub fn analyze(&mut self) -> &SymbolTable {
+        ast::visit(self.ast, self);
+        self.symbol_table()
     }
-
-    /// Resolve the type of an expression, the type system we implement
-    /// is very simple and enforces the following rules.
-    /// - Values can only be assigned to variables of the same type.
-    /// - Function parameters can only accept a value of the same type.
-    /// - Return statements bind to the type of the returned values, the type must
-    /// match the return type of the function.
-    /// - All binary operators must have the same type on the lhs and rhs.
-    /// - The equality operators can be applied to any type except `Void`
-    /// and `Function` and always return a boolean.
-    /// - The comparison operators can only be applied to integer values
-    /// and always return boolean.
-    /// - The boolean operators (!, ||, &&) can only be applied to boolean
-    /// values and always return boolean.
-    /// - The arithmetic operators can only be applied to integer values
-    /// and always return an integer..
-    fn typecheck(&self, expr: &ast::Expr) {}
 }
 
 /// `ast::Visitor` implementation for `DeclAnalyzer` processes only declarations
@@ -334,6 +308,10 @@ impl<'a> ast::Visitor<()> for DeclAnalyzer<'a> {
                         self.define_local_binding(arg);
                     }
                 }
+                // We explicitly want to fetch and unwrap the AST node instead
+                // of calling `visit_stmt` directly. Calling `visit_stmt` will
+                // naively enter a new scope again even if the block statements
+                // are still scoped to the scope we entered when binding args.
                 if let Some(func_body) = self.ast.get_stmt(*body) {
                     match func_body {
                         Stmt::Block(body) => {
@@ -372,20 +350,27 @@ impl<'a> ast::Visitor<()> for DeclAnalyzer<'a> {
                 }
                 self.table.exit();
             }
-            Stmt::If(.., body_ref, Some(else_ref)) => {
+            Stmt::If {
+                then_block: then_block_ref,
+                else_block: Some(else_block_ref),
+                ..
+            } => {
+                if let Some(stmt) = self.ast.get_stmt(*then_block_ref) {
+                    self.visit_stmt(stmt)
+                }
+                if let Some(stmt) = self.ast.get_stmt(*else_block_ref) {
+                    self.visit_stmt(stmt)
+                }
+            }
+            Stmt::For { body: body_ref, .. } => {
                 if let Some(stmt) = self.ast.get_stmt(*body_ref) {
                     self.visit_stmt(stmt)
                 }
-                if let Some(stmt) = self.ast.get_stmt(*else_ref) {
-                    self.visit_stmt(stmt)
-                }
             }
-            Stmt::For(.., stmt_ref) => {
-                if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
-                    self.visit_stmt(stmt)
-                }
-            }
-            Stmt::While(.., Some(stmt_ref)) => {
+            Stmt::While {
+                body: Some(stmt_ref),
+                ..
+            } => {
                 if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
                     self.visit_stmt(stmt)
                 }
@@ -538,9 +523,9 @@ mod tests {
                 parser.parse();
 
                 let mut decl_analyzer = DeclAnalyzer::new(parser.ast());
-                decl_analyzer.run();
+                let symbol_table = decl_analyzer.analyze();
 
-                for (ii, table) in decl_analyzer.symbol_table().tables().iter().enumerate() {
+                for (ii, table) in symbol_table.tables().iter().enumerate() {
                     println!("Scope @ {}", ii);
                     for (name, symbol) in table {
                         println!("{} => {}", name, symbol);
@@ -568,5 +553,10 @@ mod tests {
     test_decl_analyzer!(
         can_process_declarations_with_arguments,
         "int main(int a, int b, int c) { int d = b; { int a = c; } }"
+    );
+
+    test_decl_analyzer!(
+        can_process_declarations_in_a_for_loop,
+        "int main() { int i = 0; for(i=0;i<10;i = i + 1) {int b; int c; int d = i;} }"
     );
 }
