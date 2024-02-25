@@ -515,7 +515,7 @@ impl<'a> IRGenerator<'a> {
     }
 
     pub fn gen(&mut self) {
-        ast::visit(self.ast, self)
+        ast::walk(self.ast, self)
     }
 }
 
@@ -564,9 +564,9 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
         match stmt {
             // Variable declaration are
             ast::Stmt::LocalVar {
-                decl_type,
-                name,
-                value,
+                decl_type: _,
+                name: _,
+                value: _,
             } => {}
             // Blocks.
             ast::Stmt::Block(stmts) => {

@@ -407,8 +407,8 @@ pub trait Visitor<T> {
     fn visit_decl(&mut self, decl: &Decl) -> T;
 }
 
-/// Accept and run a visitor over an AST.
-pub fn visit<T>(ast: &AST, visitor: &'_ mut dyn Visitor<T>) {
+/// Walk the AST using `visitor`.
+pub fn walk<T>(ast: &AST, visitor: &'_ mut dyn Visitor<T>) {
     for decl in ast.declarations() {
         visitor.visit_decl(decl);
     }

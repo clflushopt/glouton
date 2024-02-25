@@ -6,10 +6,7 @@
 //! is used to type check the declarations and assignments.
 use std::{collections::HashMap, fmt};
 
-use crate::{
-    ast::{self, Decl, DeclType, Expr, Ref, Stmt},
-    ir::Function,
-};
+use crate::ast::{self, Decl, DeclType, Expr, Ref, Stmt};
 
 /// Scope is used to localize the symbol table scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,7 +124,6 @@ impl SymbolTable {
     // When `name` is already bound, binding fails.
     pub fn bind(&mut self, name: &str, sym: Symbol) {
         let tbl = &mut self.tables[self.current];
-
         match tbl.get(name) {
             Some(_) => {
                 unreachable!("Name {name} is already bound to {sym}")
@@ -310,7 +306,7 @@ impl<'a> DeclAnalyzer<'a> {
 
     /// Run semantic analysis pass on the given AST.
     pub fn analyze(&mut self) -> &SymbolTable {
-        ast::visit(self.ast, self);
+        ast::walk(self.ast, self);
         self.symbol_table()
     }
 }
@@ -505,6 +501,41 @@ impl<'a> SemanticAnalyzer<'a> {
                     unreachable!("Expression at ref {} was not found.", group_ref.get())
                 }
             }
+            ast::Expr::Assignment { name, value } => {
+                // The type of an assignment expression is ambigious since
+                // the left hand side might resolve to a type different
+                // from the right hand side, so we must ensure the compatibility
+                // of the assignment by resolving the right handside and compare
+                // it to the left hand side.
+                //
+                // `lvalue` must be assignable.
+                let lvalue = match self.ast.get_expr(*name) {
+                    // Must be a named expression and the named identifier must
+                    // resolve to a valid symbol.
+                    Some(ast::Expr::Named(identifier)) => {
+                        if let Some(symbol) = self.lookup(&identifier) {
+                            match symbol {
+                                Symbol::FunctionDefinition { .. } => {
+                                    unreachable!("Can't assign to function.")
+                                }
+                                _ => symbol.t(),
+                            }
+                        } else {
+                            unreachable!("No symbol with name {identifier} was found.")
+                        }
+                    }
+                    _ => unreachable!("Expression at ref {} was not found", name.get()),
+                };
+                let rvalue = match self.ast.get_expr(*value) {
+                    Some(expr) => self.resolve(expr),
+                    None => unreachable!("Expression at ref {} was not found.", value.get()),
+                };
+                assert_eq!(
+                    lvalue, rvalue,
+                    "Expected assignment lvalue type to match rvalue type."
+                );
+                lvalue
+            }
             ast::Expr::BinOp {
                 left,
                 operator,
@@ -586,7 +617,6 @@ impl<'a> SemanticAnalyzer<'a> {
             ast::Expr::BoolLiteral(_) => DeclType::Bool,
             ast::Expr::IntLiteral(_) => DeclType::Int,
             ast::Expr::CharLiteral(_) => DeclType::Char,
-            _ => todo!("Unimplemented type analysis pass for Expr {:?}", expr),
         }
     }
 }
@@ -632,9 +662,19 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
         }
     }
 
-    fn visit_stmt(&mut self, stmt: &Stmt) {}
+    fn visit_stmt(&mut self, _stmt: &Stmt) {}
 
-    fn visit_decl(&mut self, decl: &Decl) {}
+    fn visit_decl(&mut self, decl: &Decl) {
+        match decl {
+            ast::Decl::Function {
+                name,
+                return_type,
+                args,
+                body,
+            } => {}
+            _ => todo!("Unimplemented `visit_decl` for node {:?}", decl),
+        }
+    }
 }
 
 #[cfg(test)]
