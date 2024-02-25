@@ -6,7 +6,10 @@
 //! is used to type check the declarations and assignments.
 use std::{collections::HashMap, fmt};
 
-use crate::ast::{self, Decl, DeclType, Expr, Stmt};
+use crate::{
+    ast::{self, Decl, DeclType, Expr, Ref, Stmt},
+    ir::Function,
+};
 
 /// Scope is used to localize the symbol table scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +37,7 @@ pub enum Symbol {
     },
     FunctionDefinition {
         name: String,
+        args: Vec<DeclType>,
         t: DeclType,
     },
 }
@@ -46,7 +50,19 @@ impl fmt::Display for Symbol {
             }
             Self::GlobalVariable { name, t } => write!(f, "GLOBAL({}): {}", name, t),
             Self::FunctionArgument { name, t } => write!(f, "ARG({}): {}", name, t),
-            Self::FunctionDefinition { name, t } => write!(f, "FUNCTION({}): {}", name, t),
+            Self::FunctionDefinition { name, t, .. } => write!(f, "FUNCTION({}): {}", name, t),
+        }
+    }
+}
+
+impl Symbol {
+    /// Return the symbol declaration type.
+    fn t(&self) -> DeclType {
+        match self {
+            Self::LocalVariable { t, .. } => *t,
+            Self::GlobalVariable { t, .. } => *t,
+            Self::FunctionArgument { t, .. } => *t,
+            Self::FunctionDefinition { t, .. } => *t,
         }
     }
 }
@@ -83,12 +99,6 @@ impl SymbolTable {
             parent: 0,
             tables: vec![HashMap::new()],
         }
-    }
-
-    // Resolve a new symbol.
-    #[must_use]
-    pub fn resolve(&self, name: &str) -> Option<&Symbol> {
-        self.find(name, self.current)
     }
 
     // Find a symbol by starting from the given index, the index should be in
@@ -252,17 +262,31 @@ impl<'a> DeclAnalyzer<'a> {
     fn define_global_binding(&mut self, decl: &ast::Decl) {
         match decl {
             Decl::Function {
-                name, return_type, ..
+                name,
+                return_type,
+                args,
+                ..
             } => {
                 match self.scope() {
                     Scope::Local => {
                         unreachable!("function declarations are not allowed in a local scope")
                     }
                     Scope::Global => {
+                        let args = args
+                            .iter()
+                            .map(|arg_ref| match self.ast.get_stmt(*arg_ref) {
+                                Some(Stmt::FuncArg { decl_type, .. }) => *decl_type,
+                                stmt @ _ => unreachable!(
+                                    "Expected statement of kind `Stmt::FuncArg` got {:?}",
+                                    stmt
+                                ),
+                            })
+                            .collect();
                         // Bind the function definition.
                         let func_symbol = Symbol::FunctionDefinition {
                             name: name.clone(),
                             t: *return_type,
+                            args,
                         };
                         self.table.bind(name, func_symbol);
                     }
@@ -408,7 +432,7 @@ impl<'a> SemanticAnalyzer<'a> {
     /// Lookup an existing binding by name, returns a `Symbol`
     /// if one is found otherwise none.
     fn lookup(&self, name: &str) -> Option<&Symbol> {
-        self.symbol_table.resolve(name)
+        self.symbol_table.find(name, self.current_scope)
     }
     /// Enter a new scope by increment the current scope pointer.
     fn enter_scope(&mut self) {
@@ -431,6 +455,108 @@ impl<'a> SemanticAnalyzer<'a> {
     /// a panic.
     pub fn resolve(&self, expr: &ast::Expr) -> DeclType {
         match expr {
+            ast::Expr::Named(name) => match self.lookup(name) {
+                Some(sym) => sym.t(),
+                None => panic!("Identifer {name} was not found, ensure it is declared before use."),
+            },
+            ast::Expr::Call {
+                name: name_ref,
+                args,
+            } => {
+                let name = match self.ast.get_expr(*name_ref) {
+                    Some(ast::Expr::Named(name)) => name,
+                    _ => unreachable!("Expected call expression to reference `NamedExpr`"),
+                };
+                match self.lookup(name) {
+                    Some(Symbol::FunctionDefinition {
+                        name,
+                        args: func_args,
+                        t,
+                    }) => {
+                        // Ensure the `Call` expression uses the correct
+                        // number of arguments.
+                        assert_eq!(
+                            args.len(),
+                            func_args.len(),
+                            "Expected function `{name}` to have {} arguments got {} in call.",
+                            func_args.len(),
+                            args.len()
+                        );
+                        // Iterate of the function definition arguments and
+                        // the call expression references and ensure they
+                        // are of the same type.
+                        for (arg_ref, symbol_t) in args.iter().zip(func_args) {
+                            if let Some(expr) = self.ast.get_expr(*arg_ref) {
+                                let expr_t = self.resolve(expr);
+                                assert_eq!(*symbol_t, expr_t, "Expected function `{name}` call argument to be of the same type")
+                            } else {
+                                unreachable!("Expression at ref {} was not found", arg_ref.get())
+                            }
+                        }
+                        *t
+                    }
+                    _ => unreachable!("Call expression is only allowed for functions."),
+                }
+            }
+            ast::Expr::Grouping(group_ref) => {
+                if let Some(group) = self.ast.get_expr(*group_ref) {
+                    self.resolve(group)
+                } else {
+                    unreachable!("Expression at ref {} was not found.", group_ref.get())
+                }
+            }
+            ast::Expr::BinOp {
+                left,
+                operator,
+                right,
+            } => {
+                let lhs = if let Some(lhs) = self.ast.get_expr(*left) {
+                    self.resolve(lhs)
+                } else {
+                    unreachable!("LHS expression at ref {} was not found.", left.get())
+                };
+                let rhs = if let Some(rhs) = self.ast.get_expr(*right) {
+                    self.resolve(rhs)
+                } else {
+                    unreachable!("RHS expression at ref {} was not found.", right.get())
+                };
+                match operator {
+                    &ast::BinaryOperator::Add
+                    | &ast::BinaryOperator::Div
+                    | &ast::BinaryOperator::Mul
+                    | &ast::BinaryOperator::Sub => {
+                        assert!(
+                            lhs == DeclType::Int,
+                            "expected left handside to {operator} to be of type `int` got {}",
+                            lhs
+                        );
+                        assert!(
+                            rhs == DeclType::Int,
+                            "expected right handside to {operator} to be of type `int` got {}",
+                            rhs
+                        );
+                        DeclType::Int
+                    }
+                    &ast::BinaryOperator::Eq
+                    | &ast::BinaryOperator::Neq
+                    | &ast::BinaryOperator::Gt
+                    | &ast::BinaryOperator::Gte
+                    | &ast::BinaryOperator::Lt
+                    | &ast::BinaryOperator::Lte => {
+                        assert!(
+                            lhs == DeclType::Bool,
+                            "expected left handside to {operator} to be of type `bool` got {}",
+                            lhs
+                        );
+                        assert!(
+                            rhs == DeclType::Bool,
+                            "expected right handside to {operator} to be of type `bool` got {}",
+                            rhs
+                        );
+                        DeclType::Bool
+                    }
+                }
+            }
             ast::Expr::UnaryOp { operator, operand } => match operator {
                 ast::UnaryOperator::Neg => {
                     if let Some(expr) = self.ast.get_expr(*operand) {
