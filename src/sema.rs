@@ -527,7 +527,15 @@ impl<'a> SemanticAnalyzer<'a> {
                     _ => unreachable!("Expression at ref {} was not found", name.get()),
                 };
                 let rvalue = match self.ast.get_expr(*value) {
-                    Some(expr) => self.resolve(expr),
+                    Some(expr) => {
+                        // Ensure r-value is assignable.
+                        match expr {
+                            ast::Expr::Assignment { .. } => {
+                                unreachable!("R-value can't be assignment expression.")
+                            }
+                            _ => self.resolve(expr),
+                        }
+                    }
                     None => unreachable!("Expression at ref {} was not found.", value.get()),
                 };
                 assert_eq!(
