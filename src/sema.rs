@@ -1,5 +1,3 @@
-//! Glouton semantic analysis implementation.
-//!
 //! Semantic analysis follows the C0 rules and walks the AST to build a symbol
 //! table which is used to ensure the validity and soundness of the source code.
 //!
@@ -380,15 +378,25 @@ impl<'a> ast::Visitor<()> for DeclAnalyzer<'a> {
     }
 }
 
-/// Semantics analyzer is a top level visitor for processing declarations
-/// and doing smenatic checking on AST nodes.
-struct SemanticsAnalyzer<'a> {
+/// Semantics analyzer walks the AST and uses the pre-built synmbol table
+/// to validate the semantic correctness of the input program.
+///
+/// It tries to enforce the same semantic correctness that is expected of C0
+/// programs, the following is a list of rules it tries to enforce :
+///
+/// - Identifiers resolve to valid symbols in the AST.
+/// - Identifiers can't be re-used within the same block (impacts declarations)
+/// - Functions can only be declared in the global scope.
+/// - Function calls have the correct number and type of their arguments.
+/// - Functions must end with a `return` statement unless they have type `void`
+/// - L-values assignments are valid targets of R-values and of the same type.
+struct SemanticAnalyzer<'a> {
     ast: &'a ast::AST,
     symbol_table: &'a SymbolTable,
     current_scope: usize,
 }
 
-impl<'a> SemanticsAnalyzer<'a> {
+impl<'a> SemanticAnalyzer<'a> {
     pub fn new(ast: &'a ast::AST, symbol_table: &'a SymbolTable) -> Self {
         Self {
             ast,
@@ -414,93 +422,93 @@ impl<'a> SemanticsAnalyzer<'a> {
         }
     }
 
-    /// Resolve an expression to check if it was properly defined.
-    pub fn resolve(&self, expr: &ast::Expr) {
-        match expr {
-            ast::Expr::UnaryOp { operand, .. } => {
-                if let Some(expr) = self.ast.get_expr(*operand) {
-                    self.resolve(expr)
-                } else {
-                    unreachable!("expected unary expression to have operand")
-                }
-            }
-            ast::Expr::BinOp { left, right, .. } => {
-                if let (Some(lhs), Some(rhs)) =
-                    (self.ast.get_expr(*left), self.ast.get_expr(*right))
-                {
-                    self.resolve(lhs);
-                    self.resolve(rhs)
-                }
-            }
-            ast::Expr::Named(name) => {
-                if self.lookup(name).is_none() {
-                    panic!("unknown value {name}")
-                }
-            }
-            ast::Expr::Call { name, args } => {
-                if let Some(name) = self.ast.get_expr(*name) {
-                    self.resolve(name)
-                }
-                for arg_ref in args {
-                    if let Some(arg) = self.ast.get_expr(*arg_ref) {
-                        self.resolve(arg)
-                    }
-                }
-            }
-            ast::Expr::Assignment { name, .. } => match self.ast.get_expr(*name) {
-                Some(ast::Expr::Named(name)) => if let Some(symbol) = self.lookup(&name) {},
-                _ => panic!("expected l-value to be defined"),
-            },
-            ast::Expr::Grouping(group) => {
-                if let Some(expr) = self.ast.get_expr(*group) {
-                    self.resolve(expr)
-                }
-            }
-            ast::Expr::IntLiteral(_) | ast::Expr::BoolLiteral(_) | ast::Expr::CharLiteral(_) => (),
-        }
-    }
-}
-
-/// TypeChecker implements an AST visitor responsible for ensuring the type
-/// correctness of input programs.
-pub struct TypeChecker<'a> {
-    ast: &'a ast::AST,
-}
-
-impl TypeChecker<'_> {
-    /// Returns the type of an expression.
-    fn get_expr_type(expr: &Expr) -> ast::DeclType {
-        match expr {
-            Expr::IntLiteral(_) => ast::DeclType::Int,
-            Expr::BoolLiteral(_) => ast::DeclType::Bool,
-            Expr::CharLiteral(_) => ast::DeclType::Char,
-            _ => todo!("unimplemented type check for {:?}", expr),
-        }
-    }
-
-    /// Returns the type of a declaration.
-    fn get_decl_type(stmt: &Stmt) -> ast::DeclType {
-        ast::DeclType::Int
-    }
-}
-
-impl<'a> ast::Visitor<()> for TypeChecker<'a> {
-    fn visit_decl(&mut self, decl: &ast::Decl) {}
-    fn visit_expr(&mut self, expr: &ast::Expr) {
+    /// Resolve an expression's type.
+    ///
+    /// # Panicw
+    ///
+    /// `resolve` will implicitly typecheck expressions for type soundness
+    /// for example applying `!` to a non-boolean expression will cause
+    /// a panic.
+    pub fn resolve(&self, expr: &ast::Expr) -> DeclType {
         match expr {
             ast::Expr::UnaryOp { operator, operand } => match operator {
-                ast::UnaryOperator::Neg => {}
-                ast::UnaryOperator::Not => {}
+                ast::UnaryOperator::Neg => {
+                    if let Some(expr) = self.ast.get_expr(*operand) {
+                        match self.resolve(expr) {
+                            DeclType::Int => DeclType::Int,
+                            t @ _ => {
+                                unreachable!("Unexpected `-` operator on expression of type {t}")
+                            }
+                        }
+                    } else {
+                        unreachable!("Expected unary operator `-` to have a valid operand.")
+                    }
+                }
+                ast::UnaryOperator::Not => {
+                    if let Some(expr) = self.ast.get_expr(*operand) {
+                        match self.resolve(expr) {
+                            DeclType::Bool => DeclType::Bool,
+                            t @ _ => {
+                                unreachable!("Unexpected `!` operator on expression of type {t}")
+                            }
+                        }
+                    } else {
+                        unreachable!("Expected unary operator `!` to have a valid operand.")
+                    }
+                }
             },
-            _ => todo!("Unimplemented type checking pass for Expr {:?}", expr),
+            ast::Expr::BoolLiteral(_) => DeclType::Bool,
+            ast::Expr::IntLiteral(_) => DeclType::Int,
+            ast::Expr::CharLiteral(_) => DeclType::Char,
+            _ => todo!("Unimplemented type analysis pass for Expr {:?}", expr),
+        }
+    }
+}
+
+impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
+    fn visit_expr(&mut self, expr: &Expr) {
+        match expr {
+            ast::Expr::Assignment { name, value } => {
+                // Resolve the L-value identifier.
+                let lvalue = match self.ast.get_expr(*name) {
+                    Some(ast::Expr::Named(name)) => {
+                        if let Some(symbol) = self.lookup(&name) {
+                            match symbol {
+                                Symbol::FunctionArgument { .. }
+                                | Symbol::LocalVariable { .. }
+                                | Symbol::GlobalVariable { .. } => symbol,
+                                Symbol::FunctionDefinition { .. } => {
+                                    unreachable!("Can't assign to function")
+                                }
+                            }
+                        } else {
+                            panic!("Unknown identifier {name}, ensure `{name}` is declared before use.")
+                        }
+                    }
+                    expr @ _ => unreachable!(
+                        "Unexpected l-value, expected l-value to be a variable got {:?}",
+                        expr
+                    ),
+                };
+                match lvalue {
+                    Symbol::LocalVariable { t, .. } => {
+                        if let Some(assignment) = self.ast.get_expr(*value) {
+                            let assign_t = self.resolve(assignment);
+                            assert_eq!(assign_t, *t)
+                        } else {
+                            unreachable!("Expected assignment r-value to be valid expression")
+                        }
+                    }
+                    _ => todo!("Unimplemented l-value analysis"),
+                }
+            }
+            _ => todo!("Unimplemented semantic analysis pass for {:?}", expr),
         }
     }
 
-    fn visit_stmt(&mut self, stmt: &ast::Stmt) {
-        match stmt {
-            _ => todo!("Unimplemented type checking pass for statement {:?}", stmt),
-        }
-    }
+    fn visit_stmt(&mut self, stmt: &Stmt) {}
+
+    fn visit_decl(&mut self, decl: &Decl) {}
 }
 
 #[cfg(test)]

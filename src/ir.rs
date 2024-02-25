@@ -557,7 +557,7 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                 // Exit back to the global scope.
                 self.exit()
             }
-            ast::Decl::GlobalVar { .. } => {}
+            _ => todo!("Unimplemented IR generation for {:?}", decl),
         }
     }
     fn visit_stmt(&mut self, stmt: &ast::Stmt) {
