@@ -803,8 +803,36 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                 args,
                 body,
             } => {
+                let mut has_return_stmt = false;
                 if let Some(body) = self.ast.get_stmt(*body) {
                     self.visit_stmt(body)
+                }
+                match self.ast.get_stmt(*body) {
+                    Some(Stmt::Block(stmts)) => {
+                        for stmt_ref in stmts {
+                            if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
+                                self.visit_stmt(stmt);
+                            }
+                            match self.ast.get_stmt(*stmt_ref) {
+                                Some(ast::Stmt::Return(ret_expr)) => {
+                                    has_return_stmt = true;
+                                    if let Some(expr) = self.ast.get_expr(*ret_expr) {
+                                        let ret_expr_t = self.resolve(expr);
+                                        assert_eq!(ret_expr_t, *return_type, "Invalid return statement with expression of type {ret_expr_t}, function is of type {return_type}")
+                                    }
+                                }
+                                Some(stmt) => self.visit_stmt(stmt),
+                                None => unreachable!(
+                                    "Statement at ref {} was not found.",
+                                    stmt_ref.get()
+                                ),
+                            }
+                        }
+                    }
+                    _ => unreachable!("Expected function body to be a `Block` statement."),
+                }
+                if !has_return_stmt {
+                    // panic!("Function {name} with type {return_type} has no `return` statement.")
                 }
             }
         }
@@ -910,5 +938,9 @@ mod tests {
     test_semantic_analyzer!(
         can_find_invalid_call_assignment,
         "int f () { return -1; } int main() { char a = f(); }"
+    );
+    test_semantic_analyzer!(
+        can_find_function_with_invalid_return_statement,
+        "int f () { return true  } int main() { char a = f();  }"
     );
 }
