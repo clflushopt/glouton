@@ -632,64 +632,191 @@ impl<'a> SemanticAnalyzer<'a> {
 impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
     fn visit_expr(&mut self, expr: &Expr) {
         match expr {
-            ast::Expr::Assignment { name, value } => {
-                // Resolve the L-value identifier.
-                let lvalue = match self.ast.get_expr(*name) {
-                    Some(ast::Expr::Named(name)) => {
-                        if let Some(symbol) = self.lookup(&name) {
-                            match symbol {
-                                Symbol::FunctionArgument { .. }
-                                | Symbol::LocalVariable { .. }
-                                | Symbol::GlobalVariable { .. } => symbol,
-                                Symbol::FunctionDefinition { .. } => {
-                                    unreachable!("Can't assign to function")
-                                }
-                            }
-                        } else {
-                            panic!("Unknown identifier {name}, ensure `{name}` is declared before use.")
-                        }
-                    }
-                    expr @ _ => unreachable!(
-                        "Unexpected l-value, expected l-value to be a variable got {:?}",
-                        expr
-                    ),
-                };
-                match lvalue {
-                    Symbol::LocalVariable { t, .. } => {
-                        if let Some(assignment) = self.ast.get_expr(*value) {
-                            let assign_t = self.resolve(assignment);
-                            assert_eq!(assign_t, *t)
-                        } else {
-                            unreachable!("Expected assignment r-value to be valid expression")
-                        }
-                    }
-                    _ => todo!("Unimplemented l-value analysis"),
-                }
-            }
-            _ => todo!("Unimplemented semantic analysis pass for {:?}", expr),
+            //    ast::Expr::Assignment { name, value } => {
+            //        // Resolve the L-value identifier.
+            //        let lvalue = match self.ast.get_expr(*name) {
+            //            Some(ast::Expr::Named(name)) => {
+            //                if let Some(symbol) = self.lookup(&name) {
+            //                    match symbol {
+            //                        Symbol::FunctionArgument { .. }
+            //                        | Symbol::LocalVariable { .. }
+            //                        | Symbol::GlobalVariable { .. } => symbol,
+            //                        Symbol::FunctionDefinition { .. } => {
+            //                            unreachable!("Can't assign to function")
+            //                        }
+            //                    }
+            //                } else {
+            //                    panic!("Unknown identifier {name}, ensure `{name}` is declared before use.")
+            //                }
+            //            }
+            //            expr @ _ => unreachable!(
+            //                "Unexpected l-value, expected l-value to be a variable got {:?}",
+            //                expr
+            //            ),
+            //        };
+            //        match lvalue {
+            //            symbol @ (Symbol::GlobalVariable { .. }
+            //            | Symbol::LocalVariable { .. }
+            //            | Symbol::FunctionArgument { .. }) => {
+            //                if let Some(assignment) = self.ast.get_expr(*value) {
+            //                    let assign_t = self.resolve(assignment);
+            //                    assert_eq!(assign_t, symbol.t())
+            //                } else {
+            //                    unreachable!("Expected assignment r-value to be valid expression")
+            //                }
+            //            }
+            //            _ => unreachable!("Unexpected l-value kind, expected function argument, local or global variable."),
+            //        }
+            //    }
+            //    _ => todo!("Unimplemented semantic analysis pass for {:?}", expr),
+            _ => unreachable!("Semantic analysis pass is handled by internal `resolve` function."),
         }
     }
 
-    fn visit_stmt(&mut self, _stmt: &Stmt) {}
+    fn visit_stmt(&mut self, stmt: &Stmt) {
+        match stmt {
+            ast::Stmt::LocalVar {
+                decl_type,
+                name,
+                value,
+            } => {
+                if let Some(assignee) = self.ast.get_expr(*value) {
+                    let rvalue_t = self.resolve(assignee);
+                    assert_eq!(decl_type, &rvalue_t, "Invalid assignment of expression with type {rvalue_t} to l-value {name} with type {decl_type}")
+                } else {
+                    unreachable!("Expression at ref {} was not found.", value.get())
+                }
+            }
+            ast::Stmt::Expr(expr_ref) => {
+                if let Some(assignee) = self.ast.get_expr(*expr_ref) {
+                    let _ = self.resolve(assignee);
+                } else {
+                    unreachable!("Expression at ref {} was not found.", expr_ref.get())
+                }
+            }
+            ast::Stmt::Return(expr_ref) => {
+                if let Some(assignee) = self.ast.get_expr(*expr_ref) {
+                    let _ = self.resolve(assignee);
+                } else {
+                    unreachable!("Expression at ref {} was not found.", expr_ref.get())
+                }
+            }
+            ast::Stmt::Block(stmts) => {
+                for stmt_ref in stmts.iter() {
+                    if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
+                        self.visit_stmt(stmt)
+                    } else {
+                        unreachable!("Expression at ref {} was not found.", stmt_ref.get())
+                    }
+                }
+            }
+            ast::Stmt::For {
+                init,
+                condition,
+                iteration,
+                body,
+            } => {
+                // Validate initialization expression of the `for` loop is
+                // either a named or assignment expression.
+                if let Some(init_ref) = init {
+                    if let Some(init) = self.ast.get_expr(*init_ref) {
+                        let _ = self.resolve(init);
+                    } else {
+                        unreachable!("Expression at ref {} was not found.", init_ref.get())
+                    }
+                    match self.ast.get_expr(*init_ref) {
+                        Some(ast::Expr::Named(_)) | Some(ast::Expr::Assignment { .. }) => (),
+                        expr @ _ => unreachable!("Expected `for` loop initialization to be named or assignment expression got {:?}", expr)
+                    }
+                }
+                // Validate condition expression of the `for` loop resolves
+                // to `bool`  type.
+                if let Some(condition_ref) = condition {
+                    if let Some(condition) = self.ast.get_expr(*condition_ref) {
+                        let t = self.resolve(condition);
+                        assert_eq!(t, DeclType::Bool)
+                    } else {
+                        unreachable!("Expression at ref {} was not found.", condition_ref.get())
+                    }
+                }
+                // Validate iteration expression of the `for` loop is an
+                // assignment expression.
+                if let Some(iteration_ref) = iteration {
+                    match self.ast.get_expr(*iteration_ref) {
+                        Some(ast::Expr::Assignment { .. }) => (),
+                        expr @ _ => unreachable!(
+                            "Expected `for` loop iteration to be assignment expression got {:?}",
+                            expr
+                        ),
+                    }
+                }
+                // Recurisvely validate the statements in the block.
+                if let Some(block) = self.ast.get_stmt(*body) {
+                    self.visit_stmt(block)
+                } else {
+                    unreachable!("Expected `for` loop body to be `Block` statement.")
+                }
+            }
+            ast::Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                // Validate `condition` resolves to a boolean expression.
+                if let Some(condition) = self.ast.get_expr(*condition) {
+                    let t = self.resolve(condition);
+                    assert_eq!(t, DeclType::Bool)
+                } else {
+                    unreachable!("Expression at ref {} was not found.", condition.get())
+                }
+                if let Some(block) = self.ast.get_stmt(*then_block) {
+                    self.visit_stmt(block)
+                }
+                if let Some(else_block) = else_block {
+                    if let Some(block) = self.ast.get_stmt(*else_block) {
+                        self.visit_stmt(block)
+                    }
+                }
+            }
+            _ => todo!("Unimplemented visitor for stmt of kind {:?}", stmt),
+        }
+    }
 
     fn visit_decl(&mut self, decl: &Decl) {
         match decl {
+            ast::Decl::GlobalVar {
+                decl_type,
+                name,
+                value,
+            } => {
+                if let Some(assignee) = self.ast.get_expr(*value) {
+                    // Resolve the r-value type.
+                    let rvalue_t = self.resolve(assignee);
+                    assert_eq!(decl_type, &rvalue_t)
+                } else {
+                    unreachable!("Expression at ref {} was not found.", value.get())
+                }
+            }
             ast::Decl::Function {
                 name,
                 return_type,
                 args,
                 body,
-            } => {}
-            _ => todo!("Unimplemented `visit_decl` for node {:?}", decl),
+            } => {
+                if let Some(body) = self.ast.get_stmt(*body) {
+                    self.visit_stmt(body)
+                }
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::ast;
     use crate::parser::Parser;
     use crate::scanner::Scanner;
-    use crate::sema::DeclAnalyzer;
+    use crate::sema::{DeclAnalyzer, SemanticAnalyzer};
 
     // Macro to generate test cases.
     macro_rules! test_decl_analyzer {
@@ -717,6 +844,35 @@ mod tests {
         };
     }
 
+    macro_rules! test_semantic_analyzer {
+        ($name:ident, $source:expr ) => {
+            #[test]
+            #[should_panic] // Poor man's error handling but works.
+            fn $name() {
+                let source = $source;
+                let mut scanner = Scanner::new(source);
+                let tokens = scanner
+                    .scan()
+                    .expect("expected test case source to be valid");
+                let mut parser = Parser::new(&tokens);
+                parser.parse();
+
+                let mut decl_analyzer = DeclAnalyzer::new(parser.ast());
+                let symbol_table = decl_analyzer.analyze();
+                let mut semantic_analyzer = SemanticAnalyzer::new(parser.ast(), symbol_table);
+                println!("AST: {}", parser.ast());
+                for (ii, table) in symbol_table.tables().iter().enumerate() {
+                    println!("Scope @ {}", ii);
+                    for (name, symbol) in table {
+                        println!("{} => {}", name, symbol);
+                    }
+                }
+
+                ast::walk(parser.ast(), &mut semantic_analyzer)
+            }
+        };
+    }
+
     test_decl_analyzer!(
         can_process_single_declarations,
         "int main() { int a = 0; return a;}"
@@ -740,5 +896,19 @@ mod tests {
     test_decl_analyzer!(
         can_process_declarations_in_a_for_loop,
         "int main() { int i = 0; for(i=0;i<10;i = i + 1) {int b; int c; int d = i;} }"
+    );
+
+    test_semantic_analyzer!(
+        can_find_duplicate_redefinition,
+        "int main() {} int main() {}"
+    );
+
+    test_semantic_analyzer!(
+        can_find_invalid_bool_literal_assignment,
+        "int main() { int a = true; }"
+    );
+    test_semantic_analyzer!(
+        can_find_invalid_call_assignment,
+        "int f () { return -1; } int main() { char a = f(); }"
     );
 }
