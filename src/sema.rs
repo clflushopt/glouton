@@ -632,43 +632,6 @@ impl<'a> SemanticAnalyzer<'a> {
 impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
     fn visit_expr(&mut self, expr: &Expr) {
         match expr {
-            //    ast::Expr::Assignment { name, value } => {
-            //        // Resolve the L-value identifier.
-            //        let lvalue = match self.ast.get_expr(*name) {
-            //            Some(ast::Expr::Named(name)) => {
-            //                if let Some(symbol) = self.lookup(&name) {
-            //                    match symbol {
-            //                        Symbol::FunctionArgument { .. }
-            //                        | Symbol::LocalVariable { .. }
-            //                        | Symbol::GlobalVariable { .. } => symbol,
-            //                        Symbol::FunctionDefinition { .. } => {
-            //                            unreachable!("Can't assign to function")
-            //                        }
-            //                    }
-            //                } else {
-            //                    panic!("Unknown identifier {name}, ensure `{name}` is declared before use.")
-            //                }
-            //            }
-            //            expr @ _ => unreachable!(
-            //                "Unexpected l-value, expected l-value to be a variable got {:?}",
-            //                expr
-            //            ),
-            //        };
-            //        match lvalue {
-            //            symbol @ (Symbol::GlobalVariable { .. }
-            //            | Symbol::LocalVariable { .. }
-            //            | Symbol::FunctionArgument { .. }) => {
-            //                if let Some(assignment) = self.ast.get_expr(*value) {
-            //                    let assign_t = self.resolve(assignment);
-            //                    assert_eq!(assign_t, symbol.t())
-            //                } else {
-            //                    unreachable!("Expected assignment r-value to be valid expression")
-            //                }
-            //            }
-            //            _ => unreachable!("Unexpected l-value kind, expected function argument, local or global variable."),
-            //        }
-            //    }
-            //    _ => todo!("Unimplemented semantic analysis pass for {:?}", expr),
             _ => unreachable!("Semantic analysis pass is handled by internal `resolve` function."),
         }
     }
@@ -702,6 +665,7 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                 }
             }
             ast::Stmt::Block(stmts) => {
+                self.enter_scope();
                 for stmt_ref in stmts.iter() {
                     if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
                         self.visit_stmt(stmt)
@@ -709,6 +673,7 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                         unreachable!("Expression at ref {} was not found.", stmt_ref.get())
                     }
                 }
+                self.exit_scope();
             }
             ast::Stmt::For {
                 init,
@@ -765,7 +730,11 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                 // Validate `condition` resolves to a boolean expression.
                 if let Some(condition) = self.ast.get_expr(*condition) {
                     let t = self.resolve(condition);
-                    assert_eq!(t, DeclType::Bool)
+                    assert_eq!(
+                        t,
+                        DeclType::Bool,
+                        "invalid expression type in `if` statement, must be of type bool found {t}"
+                    )
                 } else {
                     unreachable!("Expression at ref {} was not found.", condition.get())
                 }
@@ -804,9 +773,7 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                 body,
             } => {
                 let mut has_return_stmt = false;
-                if let Some(body) = self.ast.get_stmt(*body) {
-                    self.visit_stmt(body)
-                }
+                self.enter_scope();
                 match self.ast.get_stmt(*body) {
                     Some(Stmt::Block(stmts)) => {
                         for stmt_ref in stmts {
@@ -834,6 +801,7 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                 if !has_return_stmt {
                     // panic!("Function {name} with type {return_type} has no `return` statement.")
                 }
+                self.exit_scope();
             }
         }
     }
@@ -942,5 +910,17 @@ mod tests {
     test_semantic_analyzer!(
         can_find_function_with_invalid_return_statement,
         "int f () { return true  } int main() { char a = f();  }"
+    );
+    test_semantic_analyzer!(
+        can_find_invalid_condition_in_if_statement,
+        "int f() { if (1) { return 0;} }"
+    );
+    test_semantic_analyzer!(
+        can_find_invalid_call_expressions,
+        "int f(int a, int b) { return a + b;} int main() { int x = f(true, false); }"
+    );
+    test_semantic_analyzer!(
+        can_find_invalid_call_expressions_in_nested_scope,
+        "int f(int a, int b) { return a + b; } int main() { { f(false, true); } }"
     );
 }

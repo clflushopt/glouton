@@ -544,7 +544,6 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                     })
                     .collect::<Vec<_>>();
                 let func_return_type = Type::from(return_type);
-
                 let func = Function::new(name.to_string(), func_args, func_return_type);
 
                 // Enter a new scope and push the new function frame.
