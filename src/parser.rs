@@ -83,16 +83,8 @@ impl Parser {
         &self.ast
     }
 
-    /// Parse the input and construct an AST.
+    /// Parse the input program and construct an AST.
     pub fn parse(&mut self) {
-        // Parse the statements that constitute our program.
-        // FIXME: C0 programs are sequence of declarations (or definitions).
-        //
-        // The BNF is :
-        // declaration ->
-        //             | funcDecl
-        //             | varDecl
-        //             | statement;
         while !self.eof() {
             let decl = self.declaration();
             self.ast.push_decl(decl);
@@ -370,7 +362,7 @@ impl Parser {
             &Token::True => self.ast.push_expr(Expr::BoolLiteral(true)),
             &Token::False => self.ast.push_expr(Expr::BoolLiteral(false)),
             Token::Identifier(_) => self.named(),
-            _ => todo!("Unexpected prefix token {}", self.prev()),
+            _ => unreachable!("Unexpected prefix token {}", self.prev()),
         };
 
         while prec < Self::get_token_precedence(self.peek()) {
@@ -469,7 +461,6 @@ impl Parser {
     fn assignment(&mut self, left: ExprRef) -> ExprRef {
         // Parse the right hand side expression.
         let expr_ref = self.by_precedence(Precedence::None);
-        self.eat(&Token::SemiColon);
         self.ast.push_expr(Expr::Assignment {
             name: left,
             value: expr_ref,
@@ -842,9 +833,17 @@ Stmt(VAR(INT_TYPE, x, 0)),
     );
 
     test_parser!(
-        can_parse_for_stmt,
+        can_parse_for_stmt_without_body,
         r#"int main() { for(;;) { i = i + 1; } }"#,
-        "FOR(, , , Block {
+        "FOR(INIT(), COND(), ITER(), Block {
+Stmt(Expr(Assign(Named(i), Add(Named(i), 1)))),
+})"
+    );
+
+    test_parser!(
+        can_parse_for_stmt_with_no_condition,
+        r#"int main() { int i = 0; for(i = 1;; i = i + 1) { i = i + 1; } }"#,
+        "FOR(INIT(Assign(Named(i), 1)), COND(), ITER(Assign(Named(i), Add(Named(i), 1))), Block {
 Stmt(Expr(Assign(Named(i), Add(Named(i), 1)))),
 })"
     );

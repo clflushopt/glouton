@@ -4,6 +4,9 @@
 //! The first pass over the AST builds a symbol table and ensures that all
 //! referenced symbols have been declared before being used. Another second pass
 //! is used to type check the declarations and assignments.
+//!
+//! This implementation of semantic analysis mostly focuses on type correctness
+//! and general soundness. Reachability analysis is currently not implemented.
 use std::{collections::HashMap, fmt};
 
 use crate::ast::{self, Decl, DeclType, Expr, Ref, Stmt};
@@ -143,12 +146,6 @@ impl SymbolTable {
     #[must_use]
     pub const fn scope(&self) -> usize {
         self.current
-    }
-
-    // Return how many symbols exist in the current scope.
-    #[must_use]
-    fn count(&self) -> usize {
-        self.tables[self.current].len()
     }
 
     // Returns the expected position in the stack starting from the current
@@ -582,16 +579,7 @@ impl<'a> SemanticAnalyzer<'a> {
                     | &ast::BinaryOperator::Gte
                     | &ast::BinaryOperator::Lt
                     | &ast::BinaryOperator::Lte => {
-                        assert!(
-                            lhs == DeclType::Bool,
-                            "expected left handside to {operator} to be of type `bool` got {}",
-                            lhs
-                        );
-                        assert!(
-                            rhs == DeclType::Bool,
-                            "expected right handside to {operator} to be of type `bool` got {}",
-                            rhs
-                        );
+                        assert_eq!(lhs, rhs, "expected left handisde and right handside of {operator} to be of the same type");
                         DeclType::Bool
                     }
                 }
@@ -708,7 +696,7 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                 // assignment expression.
                 if let Some(iteration_ref) = iteration {
                     match self.ast.get_expr(*iteration_ref) {
-                        Some(ast::Expr::Assignment { .. }) => (),
+                        Some(ast::Expr::Assignment { .. }) => println!("Got assignment"),
                         expr @ _ => unreachable!(
                             "Expected `for` loop iteration to be assignment expression got {:?}",
                             expr
@@ -754,9 +742,7 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
     fn visit_decl(&mut self, decl: &Decl) {
         match decl {
             ast::Decl::GlobalVar {
-                decl_type,
-                name,
-                value,
+                decl_type, value, ..
             } => {
                 if let Some(assignee) = self.ast.get_expr(*value) {
                     // Resolve the r-value type.
@@ -767,10 +753,7 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                 }
             }
             ast::Decl::Function {
-                name,
-                return_type,
-                args,
-                body,
+                return_type, body, ..
             } => {
                 let mut has_return_stmt = false;
                 self.enter_scope();
@@ -922,5 +905,9 @@ mod tests {
     test_semantic_analyzer!(
         can_find_invalid_call_expressions_in_nested_scope,
         "int f(int a, int b) { return a + b; } int main() { { f(false, true); } }"
+    );
+    test_semantic_analyzer!(
+        can_find_invalid_for_statement,
+        "int main() { int i; for(i = 0;;i < 1) {}}"
     );
 }

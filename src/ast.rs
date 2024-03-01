@@ -474,22 +474,19 @@ impl AST {
         self.expressions.put(expr)
     }
 
-    /// Fetches a declaration node by its reference, returning `None`
-    /// if the declaration node deosn't exist.
+    /// Return an immutable reference to `Decl` by its handle.
     #[must_use]
     pub fn get_decl(&self, decl_ref: DeclRef) -> Option<&Decl> {
         self.declarations.get(decl_ref)
     }
 
-    /// Fetches a statement node by its reference, returning `None`
-    /// if the statement node deosn't exist.
+    /// Return an immutable reference to `Stmt` by its handle.
     #[must_use]
     pub fn get_stmt(&self, stmt_ref: StmtRef) -> Option<&Stmt> {
         self.statements.get(stmt_ref)
     }
 
-    /// Fetches an expression node by its reference, returning `None`
-    /// if the expression doesn't exist.
+    /// Return an immutable reference to `Expr` by its handle.
     #[must_use]
     pub fn get_expr(&self, expr_ref: ExprRef) -> Option<&Expr> {
         self.expressions.get(expr_ref)
@@ -732,7 +729,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                     |body_stmt| self.visit_stmt(body_stmt),
                 );
 
-                format!("FOR({init}, {cond}, {iter}, {body})")
+                format!("FOR(INIT({init}), COND({cond}), ITER({iter}), {body})")
             }
             Stmt::Empty => unreachable!(
                 "empty statement is a temporary placeholder and should not be in the ast"
