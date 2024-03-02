@@ -78,7 +78,7 @@ impl Symbol {
 /// In order to simplify most operations we use three stack pointers, a root
 /// stack pointer which is immutable and points to the global scope, a pointer
 /// to the current scope and a pointer to the parent of the current scope.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SymbolTable {
     // Stack pointer to the global scope.
     root: usize,
@@ -135,11 +135,6 @@ impl SymbolTable {
                 tbl.insert(name.to_string(), sym);
             }
         }
-    }
-
-    // Returns an immutable view of the symbol tables.
-    const fn tables(&self) -> &Vec<HashMap<String, Symbol>> {
-        &self.tables
     }
 
     // Return the index of the current scope.
@@ -269,7 +264,7 @@ impl<'a> DeclAnalyzer<'a> {
                             .iter()
                             .map(|arg_ref| match self.ast.get_stmt(*arg_ref) {
                                 Some(Stmt::FuncArg { decl_type, .. }) => *decl_type,
-                                stmt @ _ => unreachable!(
+                                stmt => unreachable!(
                                     "Expected statement of kind `Stmt::FuncArg` got {:?}",
                                     stmt
                                 ),
@@ -345,11 +340,7 @@ impl<'a> ast::Visitor<()> for DeclAnalyzer<'a> {
             global_var @ Decl::GlobalVar { .. } => self.define_global_binding(global_var),
         }
     }
-    fn visit_expr(&mut self, expr: &Expr) {
-        match expr {
-            _ => (),
-        }
-    }
+    fn visit_expr(&mut self, _: &Expr) {}
 
     fn visit_stmt(&mut self, stmt: &Stmt) {
         match stmt {
@@ -510,7 +501,7 @@ impl<'a> SemanticAnalyzer<'a> {
                     // Must be a named expression and the named identifier must
                     // resolve to a valid symbol.
                     Some(ast::Expr::Named(identifier)) => {
-                        if let Some(symbol) = self.lookup(&identifier) {
+                        if let Some(symbol) = self.lookup(identifier) {
                             match symbol {
                                 Symbol::FunctionDefinition { .. } => {
                                     unreachable!("Can't assign to function.")
@@ -589,7 +580,7 @@ impl<'a> SemanticAnalyzer<'a> {
                     if let Some(expr) = self.ast.get_expr(*operand) {
                         match self.resolve(expr) {
                             DeclType::Int => DeclType::Int,
-                            t @ _ => {
+                            t => {
                                 unreachable!("Unexpected `-` operator on expression of type {t}")
                             }
                         }
@@ -601,7 +592,7 @@ impl<'a> SemanticAnalyzer<'a> {
                     if let Some(expr) = self.ast.get_expr(*operand) {
                         match self.resolve(expr) {
                             DeclType::Bool => DeclType::Bool,
-                            t @ _ => {
+                            t => {
                                 unreachable!("Unexpected `!` operator on expression of type {t}")
                             }
                         }
@@ -618,10 +609,8 @@ impl<'a> SemanticAnalyzer<'a> {
 }
 
 impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
-    fn visit_expr(&mut self, expr: &Expr) {
-        match expr {
-            _ => unreachable!("Semantic analysis pass is handled by internal `resolve` function."),
-        }
+    fn visit_expr(&mut self, _: &Expr) {
+        unreachable!("Semantic analysis pass is handled by internal `resolve` function.")
     }
 
     fn visit_stmt(&mut self, stmt: &Stmt) {
@@ -679,7 +668,7 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                     }
                     match self.ast.get_expr(*init_ref) {
                         Some(ast::Expr::Named(_)) | Some(ast::Expr::Assignment { .. }) => (),
-                        expr @ _ => unreachable!("Expected `for` loop initialization to be named or assignment expression got {:?}", expr)
+                        expr  => unreachable!("Expected `for` loop initialization to be named or assignment expression got {:?}", expr)
                     }
                 }
                 // Validate condition expression of the `for` loop resolves
@@ -687,7 +676,12 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                 if let Some(condition_ref) = condition {
                     if let Some(condition) = self.ast.get_expr(*condition_ref) {
                         let t = self.resolve(condition);
-                        assert_eq!(t, DeclType::Bool)
+                        assert_eq!(
+                            t,
+                            DeclType::Bool,
+                            "Expected `for` loop condition to be a boolean expression got {:?}",
+                            condition
+                        )
                     } else {
                         unreachable!("Expression at ref {} was not found.", condition_ref.get())
                     }
@@ -697,7 +691,7 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                 if let Some(iteration_ref) = iteration {
                     match self.ast.get_expr(*iteration_ref) {
                         Some(ast::Expr::Assignment { .. }) => println!("Got assignment"),
-                        expr @ _ => unreachable!(
+                        expr => unreachable!(
                             "Expected `for` loop iteration to be assignment expression got {:?}",
                             expr
                         ),
@@ -790,6 +784,16 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
     }
 }
 
+/// Analyze the input AST and return the symbol table.
+pub fn analyze(ast: &ast::AST) -> SymbolTable {
+    let mut decl_analyzer = DeclAnalyzer::new(ast);
+    ast::walk(ast, &mut decl_analyzer);
+    let symbol_table = decl_analyzer.symbol_table();
+    let mut semantic_analyzer = SemanticAnalyzer::new(ast, symbol_table);
+    ast::walk(ast, &mut semantic_analyzer);
+    symbol_table.clone()
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ast;
@@ -813,7 +817,7 @@ mod tests {
                 let mut decl_analyzer = DeclAnalyzer::new(parser.ast());
                 let symbol_table = decl_analyzer.analyze();
 
-                for (ii, table) in symbol_table.tables().iter().enumerate() {
+                for (ii, table) in symbol_table.tables.iter().enumerate() {
                     println!("Scope @ {}", ii);
                     for (name, symbol) in table {
                         println!("{} => {}", name, symbol);
@@ -840,7 +844,7 @@ mod tests {
                 let symbol_table = decl_analyzer.analyze();
                 let mut semantic_analyzer = SemanticAnalyzer::new(parser.ast(), symbol_table);
                 println!("AST: {}", parser.ast());
-                for (ii, table) in symbol_table.tables().iter().enumerate() {
+                for (ii, table) in symbol_table.tables.iter().enumerate() {
                     println!("Scope @ {}", ii);
                     for (name, symbol) in table {
                         println!("{} => {}", name, symbol);
@@ -907,7 +911,11 @@ mod tests {
         "int f(int a, int b) { return a + b; } int main() { { f(false, true); } }"
     );
     test_semantic_analyzer!(
-        can_find_invalid_for_statement,
+        can_find_invalid_for_statement_with_non_assignment_as_iteration,
         "int main() { int i; for(i = 0;;i < 1) {}}"
+    );
+    test_semantic_analyzer!(
+        can_find_invalid_for_statement_with_non_boolean_condition,
+        "int main() { int i; for(i = 0; i = i + 1; i = i + 1) {}}"
     );
 }

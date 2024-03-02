@@ -7,9 +7,7 @@ use std::fmt;
 /// Since the lifetime of non-tokenizable strings (such as literals) will
 /// have to flow through the compiler's entire lifecycle we avoid holding
 /// a reference to the individual literals and instead copy them.
-pub struct Scanner<'a> {
-    // Reference to the input string.
-    input: &'a str,
+pub struct Scanner {
     // Starting position of the token we are currently processing.
     start: usize,
     // Walking cursor used to walk and process tokens.
@@ -46,12 +44,11 @@ impl Error for ScanError {
     }
 }
 
-impl Scanner<'_> {
+impl Scanner {
     /// Creates a new lexer instance from a given `source` string.
     #[must_use]
-    pub fn new(source: &str) -> Scanner<'_> {
+    pub fn new(source: &str) -> Scanner {
         Scanner {
-            input: source,
             start: 0,
             cursor: 0,
             line: 1,
