@@ -265,7 +265,7 @@ impl Instruction {
     /// of their arguments to build an `Instruction`.
     ///
     /// Emit a constant instruction.
-    fn emit_const(dst: String, const_type: Type, value: Literal) -> Instruction {
+    fn constant(dst: String, const_type: Type, value: Literal) -> Instruction {
         Instruction::Constant {
             dst,
             op: ConstOp::Const,
@@ -275,7 +275,7 @@ impl Instruction {
     }
 
     /// Emit a jump instruction.
-    fn emit_jmp(target: String) -> Instruction {
+    fn jmp(target: String) -> Instruction {
         Instruction::Effect {
             args: vec![target],
             op: EffectOp::Jump,
@@ -283,7 +283,7 @@ impl Instruction {
     }
 
     /// Emit a branch instruction.
-    fn emit_branch(cond: String, then_target: String, else_target: String) -> Instruction {
+    fn branch(cond: String, then_target: String, else_target: String) -> Instruction {
         Instruction::Effect {
             args: vec![cond, then_target, else_target],
             op: EffectOp::Branch,
@@ -291,7 +291,7 @@ impl Instruction {
     }
 
     /// Emit a return instruction.
-    fn emit_ret(value: String) -> Instruction {
+    fn ret(value: String) -> Instruction {
         Instruction::Effect {
             args: vec![value],
             op: EffectOp::Return,
@@ -299,7 +299,7 @@ impl Instruction {
     }
 
     /// Emith an arithmetic operation.
-    fn emit_arith(dst: String, op_type: Type, op: ValueOp, args: Vec<String>) -> Instruction {
+    fn arith(dst: String, op_type: Type, op: ValueOp, args: Vec<String>) -> Instruction {
         Instruction::Value {
             args,
             dst,
@@ -309,7 +309,7 @@ impl Instruction {
     }
 
     /// Emit a comparison operation.
-    fn emit_cmp(dst: String, op_type: Type, op: ValueOp, args: Vec<String>) -> Instruction {
+    fn cmp(dst: String, op_type: Type, op: ValueOp, args: Vec<String>) -> Instruction {
         Instruction::Value {
             args,
             dst,
@@ -319,7 +319,7 @@ impl Instruction {
     }
 
     /// Emit a boolean operation.
-    fn emit_bool(dst: String, op_type: Type, op: ValueOp, args: Vec<String>) -> Instruction {
+    fn bool(dst: String, op_type: Type, op: ValueOp, args: Vec<String>) -> Instruction {
         Instruction::Value {
             args,
             dst,
@@ -329,7 +329,7 @@ impl Instruction {
     }
 
     /// Emit an identity operation.
-    fn emit_ident(dst: String, op_type: Type, args: Vec<String>) -> Instruction {
+    fn id(dst: String, op_type: Type, args: Vec<String>) -> Instruction {
         Instruction::Value {
             args,
             dst,
@@ -339,7 +339,7 @@ impl Instruction {
     }
 
     /// Emit a call operation.
-    fn emit_call(dst: String, op_type: Type, name: String, mut args: Vec<String>) -> Instruction {
+    fn call(dst: String, op_type: Type, name: String, mut args: Vec<String>) -> Instruction {
         // Name is the first argument.
         let mut func_args = vec![name];
         func_args.append(&mut args);
@@ -448,7 +448,7 @@ enum Scope {
 /// The result of the process is a `Vec` of IR generated functions and a global
 /// scope used to hold global variable declarations.
 pub struct IRGenerator<'a> {
-    // Program as a sequence of functions.
+    // Program as a sequence of declared functions.
     program: Vec<Function>,
     // Global scope declarations.
     glob: Vec<Instruction>,
@@ -460,6 +460,22 @@ pub struct IRGenerator<'a> {
     curr: usize,
     // Current scope.
     scope: Scope,
+}
+
+struct VarBuilder {
+    count: u32,
+}
+
+impl VarBuilder {
+    fn new() -> Self {
+        Self { count: 0 }
+    }
+
+    fn next(&mut self) -> String {
+        let var = format!("v{}", self.count);
+        self.count += 1;
+        var
+    }
 }
 
 impl<'a> IRGenerator<'a> {
@@ -585,7 +601,7 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                     Some(Instruction::Constant { dst, .. }) => dst.clone(),
                     _ => unreachable!("expected last instruction in return to be value or const"),
                 };
-                let ret = Instruction::emit_ret(ret_name);
+                let ret = Instruction::ret(ret_name);
                 self.push(ret)
             }
             _ => todo!("Unimplemented visitor for Node {:?}", stmt),
@@ -595,7 +611,7 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
         match *expr {
             ast::Expr::IntLiteral(value) => {
                 let dst = self.next_var();
-                let inst = Instruction::emit_const(dst, Type::Int, Literal::Int(value));
+                let inst = Instruction::constant(dst, Type::Int, Literal::Int(value));
                 self.push(inst)
             }
             _ => todo!("Unimplemented visitor for Node {:?}", expr),

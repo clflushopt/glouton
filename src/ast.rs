@@ -170,15 +170,15 @@ impl<T, R: Ref> Default for NodePool<T, R> {
     }
 }
 
-/// `ExprRefMarker` is a phantom type marker for node references that reference
+/// `ExprRefMarker` is a type marker for node references that reference
 /// expressions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExprRefMarker;
-/// `StmtRefMarker` is a phantom type marker for node references that reference
+/// `StmtRefMarker` is a type marker for node references that reference
 /// statements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StmtRefMarker;
-/// `DeclRefMarker` is a phantom type marker for node references that reference
+/// `DeclRefMarker` is a type marker for node references that reference
 /// declarations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeclRefMarker;
@@ -676,7 +676,6 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                     || unreachable!("missing condition for if statement"),
                     |cond_expr| self.visit_expr(cond_expr),
                 );
-
                 let then_block = self
                     .ast
                     .get_stmt(*then_ref)
