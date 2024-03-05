@@ -52,6 +52,8 @@ pub enum Literal {
     Int(i32),
     /// Booleans.
     Bool(bool),
+    /// Characters.
+    Char(char),
 }
 
 impl fmt::Display for Literal {
@@ -59,6 +61,7 @@ impl fmt::Display for Literal {
         match self {
             Self::Int(value) => write!(f, "{value}"),
             Self::Bool(value) => write!(f, "{value}"),
+            Self::Char(value) => write!(f, "{value}"),
         }
     }
 }
@@ -155,8 +158,8 @@ impl fmt::Display for ValueOp {
     }
 }
 
-/// Instruction are the atomic operations of the linear IR part in GIR
-/// they compose the building blocks of basic blocks.
+/// Instructions are the atomic operations of the linear IR part in GIR
+/// they compose the building blocks of the graph based IR.
 ///
 /// Instructions in GIR are split into three groups, each group describe a set
 /// of behaviors that the instructions implement.
@@ -451,7 +454,7 @@ pub struct IRGenerator<'a> {
     // Program as a sequence of declared functions.
     program: Vec<Function>,
     // Global scope declarations.
-    glob: Vec<Instruction>,
+    globals: Vec<Instruction>,
     // Reference to the AST we are processing.
     ast: &'a ast::AST,
     // Variable counter used to create new variables.
@@ -462,28 +465,12 @@ pub struct IRGenerator<'a> {
     scope: Scope,
 }
 
-struct VarBuilder {
-    count: u32,
-}
-
-impl VarBuilder {
-    fn new() -> Self {
-        Self { count: 0 }
-    }
-
-    fn next(&mut self) -> String {
-        let var = format!("v{}", self.count);
-        self.count += 1;
-        var
-    }
-}
-
 impl<'a> IRGenerator<'a> {
     #[must_use]
     pub fn new(ast: &'a ast::AST) -> Self {
         Self {
             program: vec![],
-            glob: vec![],
+            globals: vec![],
             ast,
             var_count: 0,
             curr: 0,
@@ -509,7 +496,7 @@ impl<'a> IRGenerator<'a> {
             Scope::Local => self.program[self.curr].push(inst),
             // TODO: assert that the instruction is not illegal in the global
             // scope i.e (not a branch for e.x)
-            Scope::Global => self.glob.push(inst),
+            Scope::Global => self.globals.push(inst),
         }
     }
 
@@ -612,6 +599,34 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
             ast::Expr::IntLiteral(value) => {
                 let dst = self.next_var();
                 let inst = Instruction::constant(dst, Type::Int, Literal::Int(value));
+                self.push(inst)
+            }
+            ast::Expr::BoolLiteral(value) => {
+                let dst = self.next_var();
+                let inst = Instruction::constant(dst, Type::Bool, Literal::Bool(value));
+                self.push(inst)
+            }
+            ast::Expr::CharLiteral(value) => {
+                let dst = self.next_var();
+                let inst = Instruction::constant(dst, Type::Char, Literal::Char(value));
+                self.push(inst)
+            }
+            ast::Expr::UnaryOp { operator, operand } => {
+                // Visitor for IR will return a lhs assignee and an instruction
+                // for the rhs assignment.
+                // let src = self.visit_expr(self.ast.get_expr(operand).unwrap());
+                let src = self.next_var();
+                let dst = self.next_var();
+                let inst = match operator {
+                    ast::UnaryOperator::Neg => {
+                        let lhs = self.next_var();
+                        let inst = Instruction::constant(lhs.clone(), Type::Int, Literal::Int(0));
+                        Instruction::arith(dst, Type::Int, ValueOp::Sub, vec![lhs, src])
+                    }
+                    ast::UnaryOperator::Not => {
+                        Instruction::arith(dst, Type::Bool, ValueOp::Not, vec![src])
+                    }
+                };
                 self.push(inst)
             }
             _ => todo!("Unimplemented visitor for Node {:?}", expr),
