@@ -7,7 +7,7 @@
 //! and effect based operations which take operands and produce no values.
 use core::fmt;
 
-use crate::ast;
+use crate::ast::{self, Visitor};
 
 /// Types used in the IR.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -126,8 +126,10 @@ pub enum ValueOp {
     Gt,
     Lte,
     Gte,
-    // Boolean operators.
+    // Unary operators.
     Not,
+    Neg,
+    // Boolean operators.
     And,
     Or,
     // Function calls that produce values.
@@ -150,6 +152,7 @@ impl fmt::Display for ValueOp {
             Self::Lte => write!(f, "lte"),
             Self::Gte => write!(f, "gte"),
             Self::Not => write!(f, "not"),
+            Self::Neg => write!(f, "neg"),
             Self::And => write!(f, "and"),
             Self::Or => write!(f, "or"),
             Self::Call => write!(f, "call"),
@@ -237,11 +240,11 @@ impl fmt::Display for Instruction {
                 op,
                 op_type,
             } => {
-                write!(f, "{dst}: {op_type} = {op}")?;
+                write!(f, "{dst}: {op_type} = {op} ")?;
                 for arg in args {
                     match op {
                         ValueOp::Call => write!(f, "@{arg}")?,
-                        _ => write!(f, "{arg}")?,
+                        _ => write!(f, "{arg} ")?,
                     }
                 }
                 write!(f, ";")
@@ -263,10 +266,18 @@ impl fmt::Display for Instruction {
     }
 }
 
+/// Instruction emitters are all owning functions, they take ownership
+/// of their arguments to build an `Instruction`.
 impl Instruction {
-    /// Instruction emitters are all owning functions, they take ownership
-    /// of their arguments to build an `Instruction`.
-    ///
+    /// Return a copy of the destination name of constant or value operations.
+    fn dst(inst: &Instruction) -> Option<String> {
+        match inst {
+            Self::Constant { dst, .. } => Some(dst.clone()),
+            Self::Value { dst, .. } => Some(dst.clone()),
+            _ => None,
+        }
+    }
+
     /// Emit a constant instruction.
     fn constant(dst: String, const_type: Type, value: Literal) -> Instruction {
         Instruction::Constant {
@@ -301,7 +312,7 @@ impl Instruction {
         }
     }
 
-    /// Emith an arithmetic operation.
+    /// Emit an arithmetic operation.
     fn arith(dst: String, op_type: Type, op: ValueOp, args: Vec<String>) -> Instruction {
         Instruction::Value {
             args,
@@ -548,7 +559,6 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                     .collect::<Vec<_>>();
                 let func_return_type = Type::from(return_type);
                 let func = Function::new(name.to_string(), func_args, func_return_type);
-
                 // Enter a new scope and push the new function frame.
                 self.enter(func);
                 // Generate IR for the body.
@@ -556,20 +566,40 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                     Some(stmt) => self.visit_stmt(stmt),
                     _ => unreachable!("expected body reference to be valid !"),
                 }
+
                 // Exit back to the global scope.
-                self.exit()
+                self.exit();
             }
             _ => todo!("Unimplemented IR generation for {:?}", decl),
         }
     }
+
     fn visit_stmt(&mut self, stmt: &ast::Stmt) {
         match stmt {
             // Variable declaration are
             ast::Stmt::LocalVar {
-                decl_type: _,
-                name: _,
-                value: _,
-            } => {}
+                decl_type,
+                name,
+                value,
+            } => {
+                let dst = name.clone();
+                if let Some(expr) = self.ast.get_expr(*value) {
+                    self.visit_expr(expr)
+                }
+                // Get the destination of the right hand side.
+                let rhs = match Instruction::dst(
+                    self.program[self.curr]
+                        .body
+                        .last()
+                        .expect("Expected right hand side to have been visited."),
+                ) {
+                    Some(rhs) => rhs,
+                    None => self.next_var(),
+                };
+
+                let inst = Instruction::id(dst, Type::from(decl_type), vec![rhs]);
+                self.push(inst)
+            }
             // Blocks.
             ast::Stmt::Block(stmts) => {
                 for stmt_ref in stmts {
@@ -594,6 +624,7 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
             _ => todo!("Unimplemented visitor for Node {:?}", stmt),
         }
     }
+
     fn visit_expr(&mut self, expr: &ast::Expr) {
         match *expr {
             ast::Expr::IntLiteral(value) => {
@@ -612,21 +643,33 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                 self.push(inst)
             }
             ast::Expr::UnaryOp { operator, operand } => {
-                // Visitor for IR will return a lhs assignee and an instruction
+                // TODO: Visitor for IR will return a lhs assignee and an instruction
                 // for the rhs assignment.
                 // let src = self.visit_expr(self.ast.get_expr(operand).unwrap());
-                let src = self.next_var();
+                if let Some(expr) = self.ast.get_expr(operand) {
+                    self.visit_expr(expr)
+                }
+                let src = Instruction::dst(
+                    self.program[self.curr]
+                        .body
+                        .last()
+                        .expect("Expected operand to have been assigned"),
+                )
+                .unwrap();
                 let dst = self.next_var();
                 let inst = match operator {
                     ast::UnaryOperator::Neg => {
-                        let lhs = self.next_var();
-                        let inst = Instruction::constant(lhs.clone(), Type::Int, Literal::Int(0));
-                        Instruction::arith(dst, Type::Int, ValueOp::Sub, vec![lhs, src])
+                        Instruction::arith(dst, Type::Int, ValueOp::Neg, vec![src])
                     }
                     ast::UnaryOperator::Not => {
                         Instruction::arith(dst, Type::Bool, ValueOp::Not, vec![src])
                     }
                 };
+                self.push(inst)
+            }
+            ast::Expr::Named(ref name) => {
+                // TODO: type must be extracted from the AST.
+                let inst = Instruction::id(self.next_var(), Type::Int, vec![name.clone()]);
                 self.push(inst)
             }
             _ => todo!("Unimplemented visitor for Node {:?}", expr),
@@ -664,4 +707,22 @@ mod tests {
     }
 
     test_ir_gen!(can_generate_const_ops, "int main() { return 0;}", &vec![]);
+    test_ir_gen!(
+        can_generate_unary_ops,
+        "int main() { int a = !true; return 0;}",
+        &vec![]
+    );
+    test_ir_gen!(
+        can_generate_multiple_assignments,
+        r#"int main() {
+            int a = !true;
+            int b = !false;
+            int c = !a;
+            int d = !b;
+            int e = 12345679;
+            int f = -e;
+            return f;
+        }"#,
+        &vec![]
+    );
 }
