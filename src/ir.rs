@@ -161,6 +161,24 @@ impl fmt::Display for ValueOp {
     }
 }
 
+impl ValueOp {
+    /// Convert an AST operator node to an instruction.
+    fn from_operator(operator: &ast::BinaryOperator) -> ValueOp {
+        match operator {
+            ast::BinaryOperator::Add => ValueOp::Add,
+            ast::BinaryOperator::Sub => ValueOp::Sub,
+            ast::BinaryOperator::Mul => ValueOp::Mul,
+            ast::BinaryOperator::Div => ValueOp::Div,
+            ast::BinaryOperator::Eq => ValueOp::Eq,
+            ast::BinaryOperator::Neq => ValueOp::Neq,
+            ast::BinaryOperator::Lt => ValueOp::Lt,
+            ast::BinaryOperator::Lte => ValueOp::Lte,
+            ast::BinaryOperator::Gt => ValueOp::Gt,
+            ast::BinaryOperator::Gte => ValueOp::Gte,
+        }
+    }
+}
+
 /// Instructions are the atomic operations of the linear IR part in GIR
 /// they compose the building blocks of the graph based IR.
 ///
@@ -232,7 +250,7 @@ impl fmt::Display for Instruction {
                 const_type,
                 value,
             } => {
-                write!(f, "{dst}: {const_type} = {op} {value};")
+                write!(f, "{dst}: {const_type} = {op} {value}")
             }
             Self::Value {
                 args,
@@ -247,7 +265,7 @@ impl fmt::Display for Instruction {
                         _ => write!(f, "{arg} ")?,
                     }
                 }
-                write!(f, ";")
+                Ok(())
             }
             Self::Effect { args, op } => {
                 write!(f, "{op} ")?;
@@ -424,9 +442,9 @@ impl fmt::Display for Function {
         writeln!(f, " {{")?;
 
         for inst in &self.body {
-            writeln!(f, "{inst}")?;
+            writeln!(f, "   {inst}")?;
         }
-        write!(f, "}}")
+        writeln!(f, "}}")
     }
 }
 
@@ -667,6 +685,41 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                 };
                 self.push(inst)
             }
+            ast::Expr::BinOp {
+                left,
+                operator,
+                right,
+            } => {
+                if let Some(expr) = self.ast.get_expr(left) {
+                    self.visit_expr(expr)
+                }
+                let lhs = Instruction::dst(
+                    self.program[self.curr]
+                        .body
+                        .last()
+                        .expect("Expected operand to have been assigned"),
+                )
+                .unwrap();
+                if let Some(expr) = self.ast.get_expr(right) {
+                    self.visit_expr(expr)
+                }
+                let rhs = Instruction::dst(
+                    self.program[self.curr]
+                        .body
+                        .last()
+                        .expect("Expected operand to have been assigned"),
+                )
+                .unwrap();
+
+                let dst = self.next_var();
+                let inst = Instruction::arith(
+                    dst,
+                    Type::Int,
+                    ValueOp::from_operator(&operator),
+                    vec![lhs, rhs],
+                );
+                self.push(inst)
+            }
             ast::Expr::Named(ref name) => {
                 // TODO: type must be extracted from the AST.
                 let inst = Instruction::id(self.next_var(), Type::Int, vec![name.clone()]);
@@ -722,6 +775,28 @@ mod tests {
             int e = 12345679;
             int f = -e;
             return f;
+        }"#,
+        &vec![]
+    );
+    test_ir_gen!(
+        can_generate_function_arguments,
+        "int main() {} int f(int a, int b) { return a + b;}",
+        &vec![]
+    );
+    test_ir_gen!(
+        can_generate_binary_ops,
+        r#"int main() {
+            int a = 1 + 1;
+            int b = 2 - 2;
+            int c = 3 * 3;
+            int d = 4 / 4;
+            int e = a == b;
+            int f = b != c;
+            int g = c > d;
+            int h = d >= e;
+            int i = e < f;
+            int j = f <= g;
+            return j;
         }"#,
         &vec![]
     );
