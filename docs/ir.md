@@ -88,13 +88,13 @@ int main() {
     int b = 2 - 2;
     int c = 3 * 3;
     int d = 4 / 4;
-    int e = a == b;
-    int f = b != c;
-    int g = c > d;
-    int h = d >= e;
-    int i = e < f;
-    int j = f <= g;
-    return j;
+    bool e = a == b;
+    bool f = b != c;
+    bool g = c > d;
+    bool h = d >= c;
+    bool i = a < b;
+    bool j = a <= b;
+    return 0;
 }
 
 ```
@@ -121,28 +121,28 @@ int main() {
    v12: int = id a
    v13: int = id b
    v14: int = eq v12 v13
-   e: int = id v14
+   e: bool = id v14
    v15: int = id b
    v16: int = id c
    v17: int = neq v15 v16
-   f: int = id v17
+   f: bool = id v17
    v18: int = id c
    v19: int = id d
    v20: int = gt v18 v19
-   g: int = id v20
-   v21: int = id d
-   v22: int = id e
+   g: bool = id v20
+   v21: int = id c
+   v22: int = id d
    v23: int = gte v21 v22
-   h: int = id v23
-   v24: int = id e
-   v25: int = id f
+   h: bool = id v23
+   v24: int = id d
+   v25: int = id c
    v26: int = lt v24 v25
-   i: int = id v26
-   v27: int = id f
-   v28: int = id g
+   i: bool = id v26
+   v27: int = id d
+   v28: int = id c
    v29: int = lte v27 v28
-   j: int = id v29
-   v30: int = id j
+   j: bool = id v29
+   v30: int = const 0
    ret v30;
 }
 
