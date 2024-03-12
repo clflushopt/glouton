@@ -7,7 +7,10 @@
 //! and effect based operations which take operands and produce no values.
 use core::fmt;
 
-use crate::ast::{self, Visitor};
+use crate::{
+    ast::{self, Visitor},
+    sema::{self, SymbolTable},
+};
 
 /// Types used in the IR.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -484,26 +487,34 @@ pub struct IRGenerator<'a> {
     program: Vec<Function>,
     // Global scope declarations.
     globals: Vec<Instruction>,
-    // Reference to the AST we are processing.
-    ast: &'a ast::AST,
     // Variable counter used to create new variables.
     var_count: u32,
     // Index in the `program` of the current function we are building.
     curr: usize,
     // Current scope.
     scope: Scope,
+    // Symbol table level we are at current, increments by 1 when we enter
+    // a scope and decrements by 1 when we exit. This is used to set the
+    // starting point when resolving symbols in the symbol table.
+    level: usize,
+    // Reference to the AST we are processing.
+    ast: &'a ast::AST,
+    // Symbol table built during semantic analysis phase.
+    symbol_table: &'a SymbolTable,
 }
 
 impl<'a> IRGenerator<'a> {
     #[must_use]
-    pub fn new(ast: &'a ast::AST) -> Self {
+    pub fn new(ast: &'a ast::AST, symbol_table: &'a sema::SymbolTable) -> Self {
         Self {
             program: vec![],
             globals: vec![],
-            ast,
             var_count: 0,
             curr: 0,
+            level: 0,
             scope: Scope::Global,
+            ast,
+            symbol_table,
         }
     }
 
@@ -532,12 +543,14 @@ impl<'a> IRGenerator<'a> {
     /// Switch to a local scope view.
     fn enter(&mut self, func: Function) {
         self.program.push(func);
+        self.level += 1;
         self.scope = Scope::Local
     }
 
     /// Exit back to the global scope.
     fn exit(&mut self) {
         self.scope = Scope::Global;
+        self.level -= 1;
         self.curr += 1
     }
 
@@ -721,8 +734,11 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                 self.push(inst)
             }
             ast::Expr::Named(ref name) => {
-                // TODO: type must be extracted from the AST.
-                let inst = Instruction::id(self.next_var(), Type::Int, vec![name.clone()]);
+                let t = match self.symbol_table.find(name, self.level) {
+                    Some(symbol) => symbol.t(),
+                    None => unreachable!("Expected a symbol for named expression : `{name}`"),
+                };
+                let inst = Instruction::id(self.next_var(), Type::from(&t), vec![name.clone()]);
                 self.push(inst)
             }
             _ => todo!("Unimplemented visitor for Node {:?}", expr),
@@ -735,6 +751,7 @@ mod tests {
     use crate::ir::IRGenerator;
     use crate::parser::Parser;
     use crate::scanner::Scanner;
+    use crate::sema::analyze;
 
     // Macro to generate test cases.
     macro_rules! test_ir_gen {
@@ -748,8 +765,9 @@ mod tests {
                     .expect("expected test case source to be valid");
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
+                let symbol_table = analyze(parser.ast());
 
-                let mut irgen = IRGenerator::new(parser.ast());
+                let mut irgen = IRGenerator::new(parser.ast(), &symbol_table);
                 irgen.gen();
 
                 for inst in irgen.program() {
@@ -762,16 +780,16 @@ mod tests {
     test_ir_gen!(can_generate_const_ops, "int main() { return 0;}", &vec![]);
     test_ir_gen!(
         can_generate_unary_ops,
-        "int main() { int a = !true; return 0;}",
+        "int main() { bool a = !true; return 0;}",
         &vec![]
     );
     test_ir_gen!(
         can_generate_multiple_assignments,
         r#"int main() {
-            int a = !true;
-            int b = !false;
-            int c = !a;
-            int d = !b;
+            bool a = !true;
+            bool b = !false;
+            bool c = !a;
+            bool d = !b;
             int e = 12345679;
             int f = -e;
             return f;
@@ -790,13 +808,13 @@ mod tests {
             int b = 2 - 2;
             int c = 3 * 3;
             int d = 4 / 4;
-            int e = a == b;
-            int f = b != c;
-            int g = c > d;
-            int h = d >= e;
-            int i = e < f;
-            int j = f <= g;
-            return j;
+            bool e = a == b;
+            bool f = b != c;
+            bool g = c > d;
+            bool h = c >= d;
+            bool i = d < c;
+            bool j = d <= c;
+            return 0;
         }"#,
         &vec![]
     );

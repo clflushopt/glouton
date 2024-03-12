@@ -57,7 +57,7 @@ impl fmt::Display for Symbol {
 
 impl Symbol {
     /// Return the symbol declaration type.
-    fn t(&self) -> DeclType {
+    pub fn t(&self) -> DeclType {
         match self {
             Self::LocalVariable { t, .. } => *t,
             Self::GlobalVariable { t, .. } => *t,
@@ -103,7 +103,7 @@ impl SymbolTable {
 
     // Find a symbol by starting from the given index, the index should be in
     // the range of symbol tables stack.
-    fn find(&self, name: &str, start: usize) -> Option<&Symbol> {
+    pub fn find(&self, name: &str, start: usize) -> Option<&Symbol> {
         // Get a reference to the current scope we're processing
         let mut idx = start;
         let mut current_scope_table = &self.tables[idx];
@@ -116,8 +116,10 @@ impl SymbolTable {
             }
             // If we didn't find the declaration in the current scope
             // we check the parent.
-            idx -= 1;
-            current_scope_table = &self.tables[idx];
+            match idx.checked_sub(1) {
+                Some(idx) => current_scope_table = &self.tables[idx],
+                None => break,
+            }
         }
         None
     }
@@ -125,7 +127,7 @@ impl SymbolTable {
     // Bind a new symbol to the current scope.
     // # Panics
     // When `name` is already bound, binding fails.
-    pub fn bind(&mut self, name: &str, sym: Symbol) {
+    fn bind(&mut self, name: &str, sym: Symbol) {
         let tbl = &mut self.tables[self.current];
         match tbl.get(name) {
             Some(_) => {
