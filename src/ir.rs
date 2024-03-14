@@ -652,6 +652,12 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                 let ret = Instruction::ret(ret_name);
                 self.push(ret)
             }
+            // Expression statements.
+            ast::Stmt::Expr(expr_ref) => {
+                if let Some(expr) = self.ast.get_expr(*expr_ref) {
+                    self.visit_expr(expr)
+                }
+            }
             _ => todo!("Unimplemented visitor for Node {:?}", stmt),
         }
     }
@@ -738,8 +744,28 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                     Some(symbol) => symbol.t(),
                     None => unreachable!("Expected a symbol for named expression : `{name}`"),
                 };
-                let inst = Instruction::id(self.next_var(), Type::from(&t), vec![name.clone()]);
+                let src = Instruction::dst(
+                    self.program[self.curr]
+                        .body
+                        .last()
+                        .expect("Expected operand to have been assigned"),
+                )
+                .unwrap();
+                let inst = Instruction::id(self.next_var(), Type::from(&t), vec![src.clone()]);
                 self.push(inst)
+            }
+            ast::Expr::Grouping(expr_ref) => {
+                if let Some(expr) = self.ast.get_expr(expr_ref) {
+                    self.visit_expr(expr)
+                }
+            }
+            ast::Expr::Assignment { name, value } => {
+                if let Some(expr) = self.ast.get_expr(value) {
+                    self.visit_expr(expr)
+                }
+                if let Some(named) = self.ast.get_expr(name) {
+                    self.visit_expr(named)
+                }
             }
             _ => todo!("Unimplemented visitor for Node {:?}", expr),
         }
@@ -816,6 +842,15 @@ mod tests {
             bool j = d <= c;
             return 0;
         }"#,
+        &vec![]
+    );
+    test_ir_gen!(
+        can_generate_assignment,
+        r#"int main() {
+            int a;
+            a = 42;
+            return a;
+}"#,
         &vec![]
     );
 }
