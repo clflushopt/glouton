@@ -5,10 +5,10 @@
 //! has three core instruction types, constant operations which produce
 //! constant values, value operations which take operands and produce values
 //! and effect based operations which take operands and produce no values.
-use core::fmt;
+use std::fmt;
 
 use crate::{
-    ast::{self, Visitor},
+    ast::{self},
     sema::{self, SymbolTable},
 };
 
