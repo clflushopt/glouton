@@ -8,7 +8,7 @@
 use std::fmt;
 
 use crate::{
-    ast::{self},
+    ast::{self, Visitor},
     sema::{self, SymbolTable},
 };
 
@@ -560,12 +560,17 @@ impl<'a> IRGenerator<'a> {
     }
 
     pub fn gen(&mut self) {
-        ast::walk(self.ast, self)
+        for decl in self.ast.declarations() {
+            let (_, code) = self.visit_decl(decl);
+            for inst in code {
+                self.push(inst)
+            }
+        }
     }
 }
 
-impl<'a> ast::Visitor<()> for IRGenerator<'a> {
-    fn visit_decl(&mut self, decl: &ast::Decl) {
+impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
+    fn visit_decl(&mut self, decl: &ast::Decl) -> (Option<String>, Vec<Instruction>) {
         match decl {
             // Function declarations are the only place where we need to switch
             // scopes explicitely, since the scope only affects where variable
@@ -593,19 +598,22 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                 // Enter a new scope and push the new function frame.
                 self.enter(func);
                 // Generate IR for the body.
-                match self.ast.get_stmt(*body) {
+                let (span, code) = match self.ast.get_stmt(*body) {
                     Some(stmt) => self.visit_stmt(stmt),
                     _ => unreachable!("expected body reference to be valid !"),
+                };
+                for inst in &code {
+                    self.push(inst.clone());
                 }
-
                 // Exit back to the global scope.
                 self.exit();
+                (span, code)
             }
             _ => todo!("Unimplemented IR generation for {:?}", decl),
         }
     }
 
-    fn visit_stmt(&mut self, stmt: &ast::Stmt) {
+    fn visit_stmt(&mut self, stmt: &ast::Stmt) -> (Option<String>, Vec<Instruction>) {
         match stmt {
             // Variable declaration are
             ast::Stmt::LocalVar {
@@ -614,158 +622,204 @@ impl<'a> ast::Visitor<()> for IRGenerator<'a> {
                 value,
             } => {
                 let dst = name.clone();
-                if let Some(expr) = self.ast.get_expr(*value) {
+                let (arg, mut code) = if let Some(expr) = self.ast.get_expr(*value) {
                     self.visit_expr(expr)
-                }
-                // Get the destination of the right hand side.
-                let rhs = match Instruction::dst(
-                    self.program[self.curr]
-                        .body
-                        .last()
-                        .expect("Expected right hand side to have been visited."),
-                ) {
-                    Some(rhs) => rhs,
-                    None => self.next_var(),
+                } else {
+                    unreachable!("Expected right handside to be a valid expression")
                 };
-
-                let inst = Instruction::id(dst, Type::from(decl_type), vec![rhs]);
-                self.push(inst)
+                // Get the destination of the right hand side.
+                code.push(Instruction::id(
+                    dst.clone(),
+                    Type::from(decl_type),
+                    vec![arg.expect("Expected right handside to be in a temporary variable")],
+                ));
+                (Some(dst), code)
             }
             // Blocks.
             ast::Stmt::Block(stmts) => {
+                let mut code = vec![];
                 for stmt_ref in stmts {
-                    if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
+                    let (_, mut block) = if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
                         self.visit_stmt(stmt)
-                    }
+                    } else {
+                        unreachable!("Expected right handside to be a valid expression")
+                    };
+
+                    code.append(&mut block);
                 }
+                (None, code)
             }
             // Return statements.
             ast::Stmt::Return(expr_ref) => {
-                if let Some(expr) = self.ast.get_expr(*expr_ref) {
+                let (name, mut code) = if let Some(expr) = self.ast.get_expr(*expr_ref) {
                     self.visit_expr(expr)
-                }
-                let ret_name = match self.last() {
-                    Some(Instruction::Value { dst, .. }) => dst.clone(),
-                    Some(Instruction::Constant { dst, .. }) => dst.clone(),
-                    _ => unreachable!("expected last instruction in return to be value or const"),
+                } else {
+                    unreachable!("Expected right handside to be a valid expression")
                 };
-                let ret = Instruction::ret(ret_name);
-                self.push(ret)
+
+                let ret = Instruction::ret(
+                    name.clone()
+                        .expect("Expected right handside to be temporary or named"),
+                );
+                code.push(ret);
+                (name, code)
             }
             // Expression statements.
             ast::Stmt::Expr(expr_ref) => {
-                if let Some(expr) = self.ast.get_expr(*expr_ref) {
+                let (name, code) = if let Some(expr) = self.ast.get_expr(*expr_ref) {
                     self.visit_expr(expr)
-                }
+                } else {
+                    unreachable!("Expected right handside to be a valid expression")
+                };
+                (name, code)
             }
             _ => todo!("Unimplemented visitor for Node {:?}", stmt),
         }
     }
 
-    fn visit_expr(&mut self, expr: &ast::Expr) {
+    fn visit_expr(&mut self, expr: &ast::Expr) -> (Option<String>, Vec<Instruction>) {
         match *expr {
             ast::Expr::IntLiteral(value) => {
+                let mut code = vec![];
                 let dst = self.next_var();
-                let inst = Instruction::constant(dst, Type::Int, Literal::Int(value));
-                self.push(inst)
+                code.push(Instruction::constant(
+                    dst.clone(),
+                    Type::Int,
+                    Literal::Int(value),
+                ));
+                (Some(dst), code)
             }
             ast::Expr::BoolLiteral(value) => {
+                let mut code = vec![];
                 let dst = self.next_var();
-                let inst = Instruction::constant(dst, Type::Bool, Literal::Bool(value));
-                self.push(inst)
+                code.push(Instruction::constant(
+                    dst.clone(),
+                    Type::Bool,
+                    Literal::Bool(value),
+                ));
+                (Some(dst), code)
             }
             ast::Expr::CharLiteral(value) => {
+                let mut code = vec![];
                 let dst = self.next_var();
-                let inst = Instruction::constant(dst, Type::Char, Literal::Char(value));
-                self.push(inst)
+                code.push(Instruction::constant(
+                    dst.clone(),
+                    Type::Char,
+                    Literal::Char(value),
+                ));
+                (Some(dst), code)
             }
             ast::Expr::UnaryOp { operator, operand } => {
                 // TODO: Visitor for IR will return a lhs assignee and an instruction
                 // for the rhs assignment.
                 // let src = self.visit_expr(self.ast.get_expr(operand).unwrap());
-                if let Some(expr) = self.ast.get_expr(operand) {
+                let (name, mut code) = if let Some(expr) = self.ast.get_expr(operand) {
                     self.visit_expr(expr)
-                }
-                let src = Instruction::dst(
-                    self.program[self.curr]
-                        .body
-                        .last()
-                        .expect("Expected operand to have been assigned"),
-                )
-                .unwrap();
+                } else {
+                    unreachable!("Expected right handside to be a valid expression")
+                };
+
                 let dst = self.next_var();
                 let inst = match operator {
-                    ast::UnaryOperator::Neg => {
-                        Instruction::arith(dst, Type::Int, ValueOp::Neg, vec![src])
-                    }
-                    ast::UnaryOperator::Not => {
-                        Instruction::arith(dst, Type::Bool, ValueOp::Not, vec![src])
-                    }
+                    ast::UnaryOperator::Neg => Instruction::arith(
+                        dst.clone(),
+                        Type::Int,
+                        ValueOp::Neg,
+                        vec![name
+                            .expect("Expected right handside to be in a temporary")
+                            .clone()],
+                    ),
+                    ast::UnaryOperator::Not => Instruction::arith(
+                        dst.clone(),
+                        Type::Bool,
+                        ValueOp::Not,
+                        vec![name
+                            .expect("Expected right handside to be in a temporary")
+                            .clone()],
+                    ),
                 };
-                self.push(inst)
+                code.push(inst);
+                (Some(dst), code)
             }
             ast::Expr::BinOp {
                 left,
                 operator,
                 right,
             } => {
-                if let Some(expr) = self.ast.get_expr(left) {
+                let mut code = vec![];
+                let (lhs, mut code_left) = if let Some(expr) = self.ast.get_expr(left) {
                     self.visit_expr(expr)
-                }
-                let lhs = Instruction::dst(
-                    self.program[self.curr]
-                        .body
-                        .last()
-                        .expect("Expected operand to have been assigned"),
-                )
-                .unwrap();
-                if let Some(expr) = self.ast.get_expr(right) {
+                } else {
+                    unreachable!("Expected right handside to be a valid expression")
+                };
+                code.append(&mut code_left);
+
+                let (rhs, mut code_right) = if let Some(expr) = self.ast.get_expr(right) {
                     self.visit_expr(expr)
-                }
-                let rhs = Instruction::dst(
-                    self.program[self.curr]
-                        .body
-                        .last()
-                        .expect("Expected operand to have been assigned"),
-                )
-                .unwrap();
+                } else {
+                    unreachable!("Expected right handside to be a valid expression")
+                };
+                code.append(&mut code_right);
 
                 let dst = self.next_var();
                 let inst = Instruction::arith(
-                    dst,
+                    dst.clone(),
                     Type::Int,
                     ValueOp::from_operator(&operator),
-                    vec![lhs, rhs],
+                    vec![
+                        lhs.expect("Expected right handside to be in a temporary")
+                            .clone(),
+                        rhs.expect("Expected right handside to be in a temporary")
+                            .clone(),
+                    ],
                 );
-                self.push(inst)
+                code.push(inst);
+                (Some(dst), code)
             }
             ast::Expr::Named(ref name) => {
                 let t = match self.symbol_table.find(name, self.level) {
                     Some(symbol) => symbol.t(),
                     None => unreachable!("Expected a symbol for named expression : `{name}`"),
                 };
-                let src = Instruction::dst(
-                    self.program[self.curr]
-                        .body
-                        .last()
-                        .expect("Expected operand to have been assigned"),
-                )
-                .unwrap();
-                let inst = Instruction::id(self.next_var(), Type::from(&t), vec![src.clone()]);
-                self.push(inst)
+                (Some(name.clone()), vec![])
             }
             ast::Expr::Grouping(expr_ref) => {
-                if let Some(expr) = self.ast.get_expr(expr_ref) {
+                let (name, code) = if let Some(expr) = self.ast.get_expr(expr_ref) {
                     self.visit_expr(expr)
-                }
+                } else {
+                    unreachable!("Expected right handside to be a valid expression")
+                };
+                (name, code)
             }
             ast::Expr::Assignment { name, value } => {
-                if let Some(expr) = self.ast.get_expr(value) {
+                let mut code = vec![];
+                let (rhs, mut code_right) = if let Some(expr) = self.ast.get_expr(value) {
                     self.visit_expr(expr)
-                }
-                if let Some(named) = self.ast.get_expr(name) {
+                } else {
+                    unreachable!("Expected right handside to be a valid expression")
+                };
+                code.append(&mut code_right);
+                // We know that by definition assignment left handside will
+                // always be a named expression, unless we are dealing with
+                // arrays or struct fields.
+                let (lhs, _) = if let Some(named) = self.ast.get_expr(name) {
                     self.visit_expr(named)
-                }
+                } else {
+                    unreachable!("Expected right handside to be a valid expression")
+                };
+                let t = match self.symbol_table.find(&lhs.clone().unwrap(), self.level) {
+                    Some(symbol) => symbol.t(),
+                    None => unreachable!(
+                        "Expected a symbol for named expression : `{}`",
+                        lhs.unwrap()
+                    ),
+                };
+                code.push(Instruction::id(
+                    lhs.clone().unwrap(),
+                    Type::from(&t),
+                    vec![rhs.unwrap()],
+                ));
+                (lhs, code)
             }
             _ => todo!("Unimplemented visitor for Node {:?}", expr),
         }
