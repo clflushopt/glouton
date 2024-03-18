@@ -105,7 +105,11 @@ impl SymbolTable {
     // the range of symbol tables stack.
     pub fn find(&self, name: &str, start: usize) -> Option<&Symbol> {
         // Get a reference to the current scope we're processing
-        let mut idx = start;
+        let mut idx = if start >= self.tables.len() {
+            self.tables.len() - 1
+        } else {
+            start
+        };
         let mut current_scope_table = &self.tables[idx];
         while idx >= self.root {
             // Try and find the declaration in the current scope.
@@ -718,7 +722,7 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                         t,
                         DeclType::Bool,
                         "invalid expression type in `if` statement, must be of type bool found {t}"
-                    )
+                    );
                 } else {
                     unreachable!("Expression at ref {} was not found.", condition.get())
                 }
