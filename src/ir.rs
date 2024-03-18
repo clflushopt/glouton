@@ -242,6 +242,11 @@ pub enum Instruction {
         // Opcode for the instruction.
         op: EffectOp,
     },
+    // Label instructions are unique, they have no effect of any kind and only
+    // serve to mark blocks in conditions, jumps and loops.
+    Label {
+        name: String,
+    },
 }
 
 impl fmt::Display for Instruction {
@@ -274,14 +279,17 @@ impl fmt::Display for Instruction {
                 write!(f, "{op} ")?;
                 for arg in args {
                     match op {
-                        EffectOp::Jump => write!(f, ".{arg}")?,
+                        EffectOp::Jump => write!(f, "{arg}")?,
                         EffectOp::Call => write!(f, "@{arg}")?,
-                        EffectOp::Branch => write!(f, ".{arg}")?,
+                        EffectOp::Branch => write!(f, "{arg} ")?,
                         EffectOp::Return => write!(f, "{arg}")?,
                         EffectOp::Nop => write!(f, ".")?,
                     }
                 }
-                write!(f, ";")
+                Ok(())
+            }
+            Self::Label { name } => {
+                write!(f, "{name}")
             }
         }
     }
@@ -323,6 +331,11 @@ impl Instruction {
             args: vec![cond, then_target, else_target],
             op: EffectOp::Branch,
         }
+    }
+
+    /// Emit a label instruction.
+    fn label(name: String) -> Instruction {
+        Instruction::Label { name }
     }
 
     /// Emit a return instruction.
@@ -489,6 +502,8 @@ pub struct IRGenerator<'a> {
     globals: Vec<Instruction>,
     // Variable counter used to create new variables.
     var_count: u32,
+    // Label counter used to create new labels.
+    label_count: u32,
     // Index in the `program` of the current function we are building.
     curr: usize,
     // Current scope.
@@ -510,6 +525,7 @@ impl<'a> IRGenerator<'a> {
             program: vec![],
             globals: vec![],
             var_count: 0,
+            label_count: 0,
             curr: 0,
             level: 0,
             scope: Scope::Global,
@@ -528,6 +544,13 @@ impl<'a> IRGenerator<'a> {
         let var = format!("v{}", self.var_count);
         self.var_count += 1;
         var
+    }
+
+    /// Returns a fresh label, used for jumps.
+    fn next_label(&mut self) -> String {
+        let label = format!(".LABEL_{}", self.label_count);
+        self.label_count += 1;
+        label
     }
 
     /// Push an instruction to the current scope.
@@ -667,6 +690,53 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
                     unreachable!("Expected right handside to be a valid expression")
                 };
                 (name, code)
+            }
+            // Conditional blocks.
+            ast::Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                let (condition, mut code) = if let Some(cond) = self.ast.get_expr(*condition) {
+                    self.visit_expr(cond)
+                } else {
+                    unreachable!("Expected condition to reference a valid expression")
+                };
+                let then_label = self.next_label();
+                let else_label = self.next_label();
+                let end_label = self.next_label();
+
+                // Push branch instruction.
+                let inst = Instruction::branch(
+                    condition.expect("Expected condition variable to be valid"),
+                    then_label.clone(),
+                    else_label.clone(),
+                );
+                code.push(inst);
+                // Push then label.
+                let inst = Instruction::label(then_label);
+                code.push(inst);
+                // Generate instruction for the then block.
+                let (_, mut block) = if let Some(block) = self.ast.get_stmt(*then_block) {
+                    self.visit_stmt(block)
+                } else {
+                    unreachable!("Expected reference to block to be a valid statement")
+                };
+                code.append(&mut block);
+                // Push jump to end.
+                let inst = Instruction::jmp(end_label.clone());
+                code.push(inst);
+                // Push else label.
+                let inst = Instruction::label(else_label);
+                code.push(inst);
+                // Push jump to end.
+                let inst = Instruction::jmp(end_label.clone());
+                code.push(inst);
+                // Push end label.
+                let inst = Instruction::label(end_label);
+                code.push(inst);
+
+                (None, code)
             }
             _ => todo!("Unimplemented visitor for Node {:?}", stmt),
         }
@@ -946,6 +1016,20 @@ mod tests {
             int main() {
                 return f(1,2);
             }
+        "#,
+        &vec![]
+    );
+    test_ir_gen!(
+        can_generate_if_block_without_else_branch,
+        r#"
+        int main() {
+            int a = 42;
+            int b = 17;
+            if (a > b) {
+                return a - b;
+            } 
+            return a + b;
+        }
         "#,
         &vec![]
     );
