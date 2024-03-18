@@ -264,7 +264,7 @@ impl fmt::Display for Instruction {
                 write!(f, "{dst}: {op_type} = {op} ")?;
                 for arg in args {
                     match op {
-                        ValueOp::Call => write!(f, "@{arg}")?,
+                        ValueOp::Call => write!(f, " @{arg} ")?,
                         _ => write!(f, "{arg} ")?,
                     }
                 }
@@ -554,11 +554,6 @@ impl<'a> IRGenerator<'a> {
         self.curr += 1
     }
 
-    /// Returns a reference to the last pushed instruction.
-    fn last(&self) -> Option<&Instruction> {
-        self.program[self.curr].body.last()
-    }
-
     pub fn gen(&mut self) {
         for decl in self.ast.declarations() {
             let (_, code) = self.visit_decl(decl);
@@ -821,7 +816,32 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
                 ));
                 (lhs, code)
             }
-            _ => todo!("Unimplemented visitor for Node {:?}", expr),
+            ast::Expr::Call { name, ref args } => {
+                let name = match self.ast.get_expr(name) {
+                    Some(ast::Expr::Named(name)) => name,
+                    _ => unreachable!("Expected reference to be a named expression for a function"),
+                };
+                let t = match self.symbol_table.find(name, self.level) {
+                    Some(symbol) => symbol.t(),
+                    None => unreachable!("Expected a symbol for named expression : `{name}`"),
+                };
+                let (vars, code): (Vec<String>, Vec<Vec<Instruction>>) = args
+                    .into_iter()
+                    .map(|arg| {
+                        if let Some(expr) = self.ast.get_expr(*arg) {
+                            let (arg, code) = self.visit_expr(expr);
+                            (arg.unwrap(), code)
+                        } else {
+                            unreachable!("Expected argument to be a valid expression")
+                        }
+                    })
+                    .unzip();
+                let mut code: Vec<Instruction> = code.into_iter().flatten().collect();
+                let dst = self.next_var();
+                let inst = Instruction::call(dst.clone(), Type::from(&t), name.to_string(), vars);
+                code.push(inst);
+                (Some(dst), code)
+            }
         }
     }
 }
@@ -905,6 +925,28 @@ mod tests {
             a = 42;
             return a;
 }"#,
+        &vec![]
+    );
+    test_ir_gen!(
+        can_generate_assignments,
+        r#"int main() {
+            int a;
+            int b;
+            int c = 42;
+            a = c;
+            b = a;
+            return b;
+        }"#,
+        &vec![]
+    );
+    test_ir_gen!(
+        can_generate_function_calls,
+        r#"
+        int f(int a, int b) { return a + b;}
+            int main() {
+                return f(1,2);
+            }
+        "#,
         &vec![]
     );
 }
