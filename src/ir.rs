@@ -627,7 +627,25 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
                 self.exit();
                 (span, code)
             }
-            _ => todo!("Unimplemented IR generation for {:?}", decl),
+            ast::Decl::GlobalVar {
+                decl_type,
+                name,
+                value,
+            } => {
+                let dst = name.clone();
+                let (arg, mut code) = if let Some(expr) = self.ast.get_expr(*value) {
+                    self.visit_expr(expr)
+                } else {
+                    unreachable!("Expected right handside to be a valid expression")
+                };
+                // Get the destination of the right hand side.
+                code.push(Instruction::id(
+                    dst.clone(),
+                    Type::from(decl_type),
+                    vec![arg.expect("Expected right handside to be in a temporary variable")],
+                ));
+                (Some(dst), code)
+            }
         }
     }
 
@@ -729,6 +747,18 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
                 // Push else label.
                 let inst = Instruction::label(else_label);
                 code.push(inst);
+                // Generate instruction for the else block if one exists.
+                if else_block.is_some() {
+                    let (_, mut block) = if let Some(block) = self
+                        .ast
+                        .get_stmt(else_block.expect("Expected else block to be `Some`"))
+                    {
+                        self.visit_stmt(block)
+                    } else {
+                        unreachable!("Expected reference to block to be a valid statement")
+                    };
+                    code.append(&mut block);
+                }
                 // Push jump to end.
                 let inst = Instruction::jmp(end_label.clone());
                 code.push(inst);
@@ -738,7 +768,121 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
 
                 (None, code)
             }
-            _ => todo!("Unimplemented visitor for Node {:?}", stmt),
+            ast::Stmt::FuncArg { decl_type, name } => {
+                unreachable!("Expected function argument to be handled in `visit_decl`")
+            }
+            ast::Stmt::For {
+                init,
+                condition,
+                iteration,
+                body,
+            } => {
+                // Generate labels for the loop.
+                let loop_body_label = self.next_label();
+                let loop_exit_label = self.next_label();
+                let mut code = Vec::new();
+                // Generate initializer block if it exists.
+                if init.is_some() {
+                    let (_, mut block) = if let Some(block) = self
+                        .ast
+                        .get_expr(init.expect("Expected init block to be `Some`"))
+                    {
+                        self.visit_expr(block)
+                    } else {
+                        unreachable!("Expected reference to initializer to be a valid expression")
+                    };
+                    code.append(&mut block);
+                }
+                // Generate the loop body label.
+                let inst = Instruction::label(loop_body_label.clone());
+                code.push(inst);
+                // Generate the loop body block.
+                let (_, mut block) = if let Some(block) = self.ast.get_stmt(*body) {
+                    self.visit_stmt(block)
+                } else {
+                    unreachable!("Expected reference to body to be a valid statement")
+                };
+                code.append(&mut block);
+                // Generate the iteration expression.
+                if iteration.is_some() {
+                    let (_, mut block) = if let Some(block) = self
+                        .ast
+                        .get_expr(iteration.expect("Expected iteration expression to be `Some`"))
+                    {
+                        self.visit_expr(block)
+                    } else {
+                        unreachable!("Expected reference to iteration to be a valid expression")
+                    };
+                    code.append(&mut block);
+                }
+                // Generate the condition block if it exists.
+                if condition.is_some() {
+                    let (condition, mut block) = if let Some(block) = self
+                        .ast
+                        .get_expr(condition.expect("Expected condition block to be `Some`"))
+                    {
+                        self.visit_expr(block)
+                    } else {
+                        unreachable!("Expected reference to initializer to be a valid expression")
+                    };
+                    code.append(&mut block);
+                    // Generate branch to exit code.
+                    let inst = Instruction::branch(
+                        condition.expect("Expected condition variable to be valid"),
+                        loop_body_label.clone(),
+                        loop_exit_label.clone(),
+                    );
+                    code.push(inst);
+                }
+                // Generate the loop exit code.
+                let inst = Instruction::label(loop_exit_label.clone());
+                code.push(inst);
+                (None, code)
+            }
+            ast::Stmt::While { condition, body } => {
+                // Generate labels for the loop.
+                let loop_body_label = self.next_label();
+                let loop_exit_label = self.next_label();
+                let mut code = Vec::new();
+                if body.is_some() {
+                    // Generate the loop body label.
+                    let inst = Instruction::label(loop_body_label.clone());
+                    code.push(inst);
+                    // Generate the loop body block.
+                    let (_, mut block) = if let Some(block) = self
+                        .ast
+                        .get_stmt(body.expect("Expected loop body to be `Some`"))
+                    {
+                        self.visit_stmt(block)
+                    } else {
+                        unreachable!("Expected reference to body to be a valid statement")
+                    };
+                    code.append(&mut block);
+                }
+                if condition.is_some() {
+                    let (condition, mut block) = if let Some(block) = self
+                        .ast
+                        .get_expr(condition.expect("Expected condition block to be `Some`"))
+                    {
+                        self.visit_expr(block)
+                    } else {
+                        unreachable!("Expected reference to initializer to be a valid expression")
+                    };
+                    code.append(&mut block);
+                    // Generate branch to exit code.
+                    let inst = Instruction::branch(
+                        condition.expect("Expected condition variable to be valid"),
+                        loop_body_label.clone(),
+                        loop_exit_label.clone(),
+                    );
+                    code.push(inst);
+                }
+                // Generate the loop exit code.
+                let inst = Instruction::label(loop_exit_label.clone());
+                code.push(inst);
+                (None, code)
+            }
+            ast::Stmt::Empty => (None, vec![]),
         }
     }
 
@@ -1030,6 +1174,35 @@ mod tests {
             } 
             return a + b;
         }
+        "#,
+        &vec![]
+    );
+    test_ir_gen!(
+        can_generate_for_loop,
+        r#"
+            int main() {
+                int i = 0;
+                int x = 0;
+                for (i = 1;i <= 100;i = i+1) {
+                    x = i + 1;
+                }
+                return 0;
+            }
+        "#,
+        &vec![]
+    );
+    test_ir_gen!(
+        can_generate_while_loop,
+        r#"
+            int main() {
+                int i = 0;
+                int x = 0;
+                while (i <= 100) {
+                    x = x + 1;
+                    i = i + 1;
+                }
+                return x;
+            }
         "#,
         &vec![]
     );

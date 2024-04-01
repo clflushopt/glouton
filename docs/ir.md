@@ -148,6 +148,161 @@ int main() {
 
 ```
 
+A simple loop that does a sum.
+
+```c
+
+int main() {
+    int i = 0;
+    int x = 0;
+    for (i = 1;i <= 100;i = i+1) {
+        x = i + 1;
+    }
+    return 0;
+}
+
+```
+
+```asm
+
+@main: int {
+   # Initialize i = 0
+   v0: int = const 0
+   i: int = id v0
+   # Initialize x = 0
+   v1: int = const 0
+   x: int = id v1
+   # Loop initialization i = 1
+   v2: int = const 1
+   i: int = id v2
+   # Loop body
+   .LABEL_0
+   # x = i + 1
+   v3: int = const 1
+   v4: int = add i v3
+   x: int = id v4
+   # Loop iteration
+   # i = i + 1
+   v5: int = const 1
+   v6: int = add i v5
+   i: int = id v6
+   # Loop condition
+   # i <= 100
+   v7: int = const 100
+   v8: int = lte i v7
+   br v8 .LABEL_0 .LABEL_1
+   # Loop exit
+   .LABEL_1
+   v9: int = const 0
+   ret v9
+}
+
+```
+
+While loops.
+
+```c
+
+int main() {
+    int i = 0;
+    int x = 0;
+    while (i <= 100) {
+        x = x + 1;
+        i = i + 1;
+    }
+    return x;
+}
+
+```
+
+
+```asm
+
+@main: int {
+   v0: int = const 0
+   i: int = id v0
+   v1: int = const 0
+   x: int = id v1
+   .LABEL_0
+   v2: int = const 1
+   v3: int = add x v2
+   x: int = id v3
+   v4: int = const 1
+   v5: int = add i v4
+   i: int = id v5
+   v6: int = const 100
+   v7: int = lte i v6
+   br v7 .LABEL_0 .LABEL_1
+   .LABEL_1
+   ret x
+}
+
+```
+
+Function calls
+
+```c
+
+int f(int a, int b) { return a + b;}
+
+int main() {
+    return f(1,2);
+}
+
+```
+
+```asm
+
+@f(a: int, b: int): int {
+   v0: int = add a b
+   ret v0
+}
+
+@main: int {
+   v1: int = const 1
+   v2: int = const 2
+   v3: int = call  @f  @v1  @v2
+   ret v3
+}
+
+```
+
+Conditionals
+
+```c
+
+int main() {
+    int a = 42;
+    int b = 17;
+    if (a > b) {
+        return a - b;
+    } 
+    return a + b;
+}
+
+```
+
+```asm
+
+@main: int {
+   v0: int = const 42
+   a: int = id v0
+   v1: int = const 17
+   b: int = id v1
+   v2: int = gt a b
+   br v2 .LABEL_0 .LABEL_1
+   .LABEL_0
+   v3: int = sub a b
+   ret v3
+   jmp .LABEL_2
+   .LABEL_1
+   jmp .LABEL_2
+   .LABEL_2
+   v4: int = add a b
+   ret v4
+}
+
+```
 
 
 ## Reference

@@ -98,7 +98,7 @@ impl Parser {
             Token::Return => self.return_stmt(),
             Token::LBrace => self.block(),
             Token::For => self.loop_stmt(),
-            Token::While => unimplemented!("unimplemented parsing for while loops"),
+            Token::While => self.while_loop_stmt(),
             Token::If => self.if_stmt(),
             _ => self.expr_stmt(),
         }
@@ -333,6 +333,27 @@ impl Parser {
             condition,
             iteration,
             body: body_ref,
+        }
+    }
+
+    /// Parse a while loop.
+    fn while_loop_stmt(&mut self) -> Stmt {
+        self.eat(&Token::While);
+        // Opening parenthesis.
+        self.eat(&Token::LParen);
+        // Parse initialization.
+        let condition = match self.peek() {
+            // No starting condition for the `For` loop.
+            &Token::SemiColon => None,
+            _ => Some(self.expression()),
+        };
+        self.eat(&Token::RParen);
+        // Loop body.
+        let body = self.statement();
+        let body_ref = self.ast.push_stmt(body);
+        Stmt::While {
+            condition,
+            body: Some(body_ref),
         }
     }
 

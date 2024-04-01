@@ -696,7 +696,7 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                 // assignment expression.
                 if let Some(iteration_ref) = iteration {
                     match self.ast.get_expr(*iteration_ref) {
-                        Some(ast::Expr::Assignment { .. }) => println!("Got assignment"),
+                        Some(ast::Expr::Assignment { .. }) => (),
                         expr => unreachable!(
                             "Expected `for` loop iteration to be assignment expression got {:?}",
                             expr
@@ -733,6 +733,32 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                     if let Some(block) = self.ast.get_stmt(*else_block) {
                         self.visit_stmt(block)
                     }
+                }
+            }
+            ast::Stmt::While { condition, body } => {
+                // Validate condition expression of the `for` loop resolves
+                // to `bool`  type.
+                if let Some(condition_ref) = condition {
+                    if let Some(condition) = self.ast.get_expr(*condition_ref) {
+                        let t = self.resolve(condition);
+                        assert_eq!(
+                            t,
+                            DeclType::Bool,
+                            "Expected `while` loop condition to be a boolean expression got {:?}",
+                            condition
+                        )
+                    } else {
+                        unreachable!("Expression at ref {} was not found.", condition_ref.get())
+                    }
+                }
+                // Recurisvely validate the statements in the block.
+                if let Some(block) = self
+                    .ast
+                    .get_stmt(body.expect("Expected body to be a valid statement"))
+                {
+                    self.visit_stmt(block)
+                } else {
+                    unreachable!("Expected `for` loop body to be `Block` statement.")
                 }
             }
             _ => todo!("Unimplemented visitor for stmt of kind {:?}", stmt),
