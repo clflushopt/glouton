@@ -1,4 +1,4 @@
-use glouton::{parser, scanner, sema};
+use glouton::{ir, parser, scanner, sema};
 
 const MAIN_PROGRAM: &str = r#"
 int main() {
@@ -14,5 +14,10 @@ fn compile() {
     let tokens = scanner::Scanner::new(MAIN_PROGRAM).scan().unwrap();
     let mut parser = parser::Parser::new(&tokens);
     parser.parse();
-    let _symbol_table = sema::analyze(parser.ast());
+    let symbol_table = sema::analyze(parser.ast());
+    let mut irgen = ir::IRGenerator::new(parser.ast(), &symbol_table);
+    irgen.gen();
+    for inst in irgen.program() {
+        println!("{inst}");
+    }
 }

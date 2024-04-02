@@ -535,7 +535,7 @@ impl<'a> IRGenerator<'a> {
     }
 
     /// Returns a non-mutable reference to the generated program.
-    const fn program(&self) -> &Vec<Function> {
+    pub const fn program(&self) -> &Vec<Function> {
         &self.program
     }
 
