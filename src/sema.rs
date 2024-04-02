@@ -90,6 +90,17 @@ pub struct SymbolTable {
     tables: Vec<HashMap<String, Symbol>>,
 }
 
+impl fmt::Display for SymbolTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (scope, table) in self.tables.iter().enumerate() {
+            for (name, symbol) in table {
+                writeln!(f, "{scope}: {name} @ {symbol}").unwrap();
+            }
+        }
+        Ok(())
+    }
+}
+
 impl SymbolTable {
     /// Create a new symbol table instance.
     fn new() -> Self {
@@ -106,6 +117,7 @@ impl SymbolTable {
     pub fn find(&self, name: &str, start: usize) -> Option<&Symbol> {
         // Get a reference to the current scope we're processing
         let mut idx = if start >= self.tables.len() {
+            // Should be unreacheable ?
             self.tables.len() - 1
         } else {
             start
@@ -124,6 +136,7 @@ impl SymbolTable {
                 Some(idx) => current_scope_table = &self.tables[idx],
                 None => break,
             }
+            idx = idx - 1
         }
         None
     }

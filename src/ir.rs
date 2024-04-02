@@ -298,15 +298,6 @@ impl fmt::Display for Instruction {
 /// Instruction emitters are all owning functions, they take ownership
 /// of their arguments to build an `Instruction`.
 impl Instruction {
-    /// Return a copy of the destination name of constant or value operations.
-    fn dst(inst: &Instruction) -> Option<String> {
-        match inst {
-            Self::Constant { dst, .. } => Some(dst.clone()),
-            Self::Value { dst, .. } => Some(dst.clone()),
-            _ => None,
-        }
-    }
-
     /// Emit a constant instruction.
     fn constant(dst: String, const_type: Type, value: Literal) -> Instruction {
         Instruction::Constant {
@@ -358,16 +349,6 @@ impl Instruction {
 
     /// Emit a comparison operation.
     fn cmp(dst: String, op_type: Type, op: ValueOp, args: Vec<String>) -> Instruction {
-        Instruction::Value {
-            args,
-            dst,
-            op,
-            op_type,
-        }
-    }
-
-    /// Emit a boolean operation.
-    fn bool(dst: String, op_type: Type, op: ValueOp, args: Vec<String>) -> Instruction {
         Instruction::Value {
             args,
             dst,
@@ -673,6 +654,7 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
             }
             // Blocks.
             ast::Stmt::Block(stmts) => {
+                self.level += 1;
                 let mut code = vec![];
                 for stmt_ref in stmts {
                     let (_, mut block) = if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
@@ -683,6 +665,7 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
 
                     code.append(&mut block);
                 }
+                self.level -= 1;
                 (None, code)
             }
             // Return statements.
@@ -768,7 +751,10 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
 
                 (None, code)
             }
-            ast::Stmt::FuncArg { decl_type, name } => {
+            ast::Stmt::FuncArg {
+                decl_type: _,
+                name: _,
+            } => {
                 unreachable!("Expected function argument to be handled in `visit_decl`")
             }
             ast::Stmt::For {
@@ -971,22 +957,44 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
                 code.append(&mut code_right);
 
                 let dst = self.next_var();
-                let inst = Instruction::arith(
-                    dst.clone(),
-                    Type::Int,
-                    ValueOp::from_operator(&operator),
-                    vec![
-                        lhs.expect("Expected right handside to be in a temporary")
-                            .clone(),
-                        rhs.expect("Expected right handside to be in a temporary")
-                            .clone(),
-                    ],
-                );
+                let inst = match operator {
+                    ast::BinaryOperator::Add
+                    | ast::BinaryOperator::Sub
+                    | ast::BinaryOperator::Mul
+                    | ast::BinaryOperator::Div => Instruction::arith(
+                        dst.clone(),
+                        Type::Int,
+                        ValueOp::from_operator(&operator),
+                        vec![
+                            lhs.expect("Expected right handside to be in a temporary")
+                                .clone(),
+                            rhs.expect("Expected right handside to be in a temporary")
+                                .clone(),
+                        ],
+                    ),
+                    ast::BinaryOperator::Eq
+                    | ast::BinaryOperator::Neq
+                    | ast::BinaryOperator::Gt
+                    | ast::BinaryOperator::Gte
+                    | ast::BinaryOperator::Lt
+                    | ast::BinaryOperator::Lte => Instruction::cmp(
+                        dst.clone(),
+                        Type::Bool,
+                        ValueOp::from_operator(&operator),
+                        vec![
+                            lhs.expect("Expected right handside to be in a temporary")
+                                .clone(),
+                            rhs.expect("Expected right handside to be in a temporary")
+                                .clone(),
+                        ],
+                    ),
+                };
+
                 code.push(inst);
                 (Some(dst), code)
             }
             ast::Expr::Named(ref name) => {
-                let t = match self.symbol_table.find(name, self.level) {
+                let _t = match self.symbol_table.find(name, self.level) {
                     Some(symbol) => symbol.t(),
                     None => unreachable!("Expected a symbol for named expression : `{name}`"),
                 };
@@ -1080,6 +1088,7 @@ mod tests {
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
                 let symbol_table = analyze(parser.ast());
+                println!("Symbol table : {symbol_table}");
 
                 let mut irgen = IRGenerator::new(parser.ast(), &symbol_table);
                 irgen.gen();
@@ -1200,6 +1209,23 @@ mod tests {
                 while (i <= 100) {
                     x = x + 1;
                     i = i + 1;
+                }
+                return x;
+            }
+        "#,
+        &vec![]
+    );
+
+    test_ir_gen!(
+        can_generate_nested_scopes,
+        r#"
+            int main() {
+                int i = 0;
+                int x = 0;
+                {
+                    int x = 1;
+                    int y = 2;
+                    int i = x + y;
                 }
                 return x;
             }
