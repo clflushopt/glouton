@@ -96,8 +96,6 @@ pub enum EffectOp {
     Call,
     // Return statements.
     Return,
-    // No operation.
-    Nop,
 }
 
 impl fmt::Display for EffectOp {
@@ -107,7 +105,6 @@ impl fmt::Display for EffectOp {
             Self::Branch => write!(f, "br"),
             Self::Call => write!(f, "call"),
             Self::Return => write!(f, "ret"),
-            Self::Nop => write!(f, "nop"),
         }
     }
 }
@@ -166,7 +163,7 @@ impl fmt::Display for ValueOp {
 
 impl ValueOp {
     /// Convert an AST operator node to an instruction.
-    fn from_operator(operator: &ast::BinaryOperator) -> ValueOp {
+    fn from(operator: &ast::BinaryOperator) -> ValueOp {
         match operator {
             ast::BinaryOperator::Add => ValueOp::Add,
             ast::BinaryOperator::Sub => ValueOp::Sub,
@@ -283,7 +280,6 @@ impl fmt::Display for Instruction {
                         EffectOp::Call => write!(f, "@{arg}")?,
                         EffectOp::Branch => write!(f, "{arg} ")?,
                         EffectOp::Return => write!(f, "{arg}")?,
-                        EffectOp::Nop => write!(f, ".")?,
                     }
                 }
                 Ok(())
@@ -298,6 +294,26 @@ impl fmt::Display for Instruction {
 /// Instruction emitters are all owning functions, they take ownership
 /// of their arguments to build an `Instruction`.
 impl Instruction {
+    /// Returns `true` if the instruction is considered a terminator.
+    pub fn is_terminator(&self) -> bool {
+        match self {
+            &Self::Effect { op, .. } => match op {
+                EffectOp::Jump | EffectOp::Branch | EffectOp::Return => true,
+                EffectOp::Call => false,
+            },
+            &Self::Label { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Returns `true` if the instruction is a label.
+    pub fn is_label(&self) -> bool {
+        match self {
+            &Self::Label { .. } => true,
+            _ => false,
+        }
+    }
+
     /// Emit a constant instruction.
     fn constant(dst: String, const_type: Type, value: Literal) -> Instruction {
         Instruction::Constant {
@@ -459,6 +475,11 @@ impl Function {
     /// Push an instruction.
     fn push(&mut self, inst: Instruction) {
         self.body.push(inst)
+    }
+
+    /// Return a reference to the function instructions.
+    pub fn instructions(&self) -> &Vec<Instruction> {
+        &self.body
     }
 }
 
@@ -964,7 +985,7 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
                     | ast::BinaryOperator::Div => Instruction::arith(
                         dst.clone(),
                         Type::Int,
-                        ValueOp::from_operator(&operator),
+                        ValueOp::from(&operator),
                         vec![
                             lhs.expect("Expected right handside to be in a temporary")
                                 .clone(),
@@ -980,7 +1001,7 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
                     | ast::BinaryOperator::Lte => Instruction::cmp(
                         dst.clone(),
                         Type::Bool,
-                        ValueOp::from_operator(&operator),
+                        ValueOp::from(&operator),
                         vec![
                             lhs.expect("Expected right handside to be in a temporary")
                                 .clone(),
@@ -1093,8 +1114,8 @@ mod tests {
                 let mut irgen = IRGenerator::new(parser.ast(), &symbol_table);
                 irgen.gen();
 
-                for inst in irgen.program() {
-                    println!("{inst}");
+                for func in irgen.program() {
+                    println!("{func}");
                 }
             }
         };
