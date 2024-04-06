@@ -814,9 +814,15 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
                     unreachable!("Expected reference to block to be a valid statement")
                 };
                 code.append(&mut block);
-                // Push jump to end.
-                let inst = Instruction::jmp(end_label.clone());
-                code.push(inst);
+                // Push jump to end if and only if the last instruction of the
+                // then block is not a return.
+                if !code.last().is_some_and(|inst| match inst.opcode() {
+                    OPCode::Return => true,
+                    _ => false,
+                }) {
+                    let inst = Instruction::jmp(end_label.clone());
+                    code.push(inst);
+                }
                 // Push else label.
                 let inst = Instruction::label(else_label);
                 code.push(inst);
@@ -832,9 +838,13 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
                     };
                     code.append(&mut block);
                 }
-                // Push jump to end.
-                let inst = Instruction::jmp(end_label.clone());
-                code.push(inst);
+                if !code.last().is_some_and(|inst| match inst.opcode() {
+                    OPCode::Return => true,
+                    _ => false,
+                }) {
+                    let inst = Instruction::jmp(end_label.clone());
+                    code.push(inst);
+                }
                 // Push end label.
                 let inst = Instruction::label(end_label);
                 code.push(inst);

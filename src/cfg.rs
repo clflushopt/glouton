@@ -299,10 +299,8 @@ mod tests {
             int b = 17;
             if (a > b) {
                 return a - b;
-            } else {
-                return a + b;
-            }
-            return 0;
+            } 
+            return a + b;
         }
         "#,
         &vec![]
