@@ -8,13 +8,13 @@ use std::collections::HashMap;
 ///
 /// The first handle or reference we expose is a `BlockRef` which is used
 /// to reference basic blocks (the nodes in the graph).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BlockRef(usize);
 
 /// We also expose a handle to edges in the graph, since our edges are enums
 /// that hold data (instruction, labels...) they need to have their own storage
 /// in the graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EdgeRef(usize);
 
 /// `BasicBlock` is the atomic unit of the graph IR and represent a node in
@@ -92,6 +92,25 @@ pub struct Graph {
     labels: HashMap<String, BlockRef>,
     // Edges in the control flow graph.
     edges: Vec<Edge>,
+    // Successors map.
+    successors: HashMap<String, Vec<String>>,
+}
+
+impl fmt::Display for Graph {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "digraph {} {{", "Example");
+        for label in self.labels.keys() {
+            writeln!(f, "      {};", label);
+        }
+
+        for (label, succs) in &self.successors {
+            for succ in succs {
+                writeln!(f, "       {} -> {};", label, succ);
+            }
+        }
+
+        writeln!(f, "}}")
+    }
 }
 
 impl Graph {
@@ -112,6 +131,7 @@ impl Graph {
         Self {
             blocks,
             labels: HashMap::new(),
+            successors: HashMap::new(),
             edges: Vec::new(),
         }
     }
@@ -120,8 +140,6 @@ impl Graph {
     fn form_basic_blocks(instrs: &[ir::Instruction]) -> Vec<BasicBlock> {
         let mut blocks = Vec::new();
         let mut block = BasicBlock::new();
-        // Map labels to `BlockRef`.
-        let mut labels = HashMap::<String, BlockRef>::new();
         for inst in instrs {
             if !inst.is_label() {
                 block.append(inst);
@@ -131,16 +149,79 @@ impl Graph {
                 }
             }
             if inst.is_label() {
+                if block.instrs.len() > 0 {
+                    blocks.push(block)
+                }
                 match inst {
                     &ir::Instruction::Label { ref name } => {
+                        block = BasicBlock::new();
                         block.append(inst);
-                        labels.insert(name.clone(), BlockRef(blocks.len()));
                     }
                     _ => unreachable!(),
                 }
             }
         }
         blocks
+    }
+    /// Build a map from labels to blocks.
+    fn label_blocks(&mut self) {
+        for (index, block) in self.blocks.iter().enumerate() {
+            if block.instrs[0].is_label() {
+                match block.instrs[0] {
+                    ir::Instruction::Label { ref name } => {
+                        self.labels.insert(name.clone(), BlockRef(index));
+                    }
+                    _ => (),
+                }
+            } else {
+                let label = format!("_LABEL_AUTO_{}", index);
+                self.labels.insert(label, BlockRef(index));
+            }
+        }
+    }
+
+    /// Produce a list of succesors for each basic block.
+    fn successors(&mut self) {
+        let mut successors = HashMap::new();
+
+        for (label, block_ref) in &self.labels {
+            let mut succs = vec![];
+            let last = self.blocks[block_ref.0]
+                .instrs
+                .last()
+                .expect("Expected instruction found empty basic block");
+
+            match last {
+                ir::Instruction::Effect { args, op } => match last.opcode() {
+                    ir::OPCode::Jump | ir::OPCode::Branch => {
+                        for arg in args {
+                            if let Some(next) = self.labels.get(arg) {
+                                succs.push(arg.clone())
+                            }
+                        }
+                    }
+                    ir::OPCode::Return => succs = vec![],
+                    _ => (),
+                },
+                _ => {
+                    if block_ref.0 == self.labels.len() - 1 {
+                        succs = vec![]
+                    } else {
+                        let block_name = self.labels.iter().find_map(|(k, &val)| {
+                            if val == BlockRef(block_ref.0 + 1) {
+                                Some(k.clone())
+                            } else {
+                                unreachable!("No label found for block {}", block_ref.0 + 1)
+                            }
+                        });
+                        succs = vec![block_name.unwrap()]
+                    }
+                }
+            }
+            successors.insert(label.clone(), succs);
+        }
+
+        self.successors = successors
     }
 }
 
@@ -170,17 +251,26 @@ mod tests {
                 let mut irgen = IRGenerator::new(parser.ast(), &symbol_table);
                 irgen.gen();
 
-                println!("Instructions: ");
-                for func in irgen.program() {
-                    println!("{func}");
+                // println!("Instructions: ");
+                // for func in irgen.program() {
+                //     println!("{func}");
+                // }
+                let mut graph = Graph::new(irgen.program());
+                graph.label_blocks();
+                // Compuyte successors.
+                graph.successors();
+                for (label, succs) in &graph.successors {
+                    println!("Label {} | Successors {:?}", label, succs)
                 }
-                println!("Basic Blocks: ");
-                for func in irgen.program() {
-                    let blocks = Graph::form_basic_blocks(func.instructions());
-                    for block in blocks {
-                        println!("Start");
-                        println!("{block}");
-                        println!("End");
+
+                println!("Graph :");
+                println!("{}", graph);
+
+                for (name, block_ref) in &graph.labels {
+                    let block = &graph.blocks[block_ref.0];
+                    println!("Block {}", name);
+                    for inst in &block.instrs {
+                        println!("{}", inst);
                     }
                 }
             }

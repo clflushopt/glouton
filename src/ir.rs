@@ -138,6 +138,43 @@ pub enum ValueOp {
     Id,
 }
 
+/// OPCode is a type wrapper around all opcodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OPCode {
+    // Indirect jumps.
+    Jump,
+    // Condtional branches.
+    Branch,
+    // Function calls that don't produce values.
+    Call,
+    // Return statements.
+    Return,
+    /// `const` operation.
+    Const,
+    // Arithmetic operators.
+    Add,
+    Sub,
+    Mul,
+    Div,
+    // Comparison operators.
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Lte,
+    Gte,
+    // Unary operators.
+    Not,
+    Neg,
+    // Boolean operators.
+    And,
+    Or,
+    // Identity operator.
+    Id,
+    // Label instructions.
+    Label,
+}
+
 impl fmt::Display for ValueOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -311,6 +348,38 @@ impl Instruction {
         match self {
             &Self::Label { .. } => true,
             _ => false,
+        }
+    }
+
+    /// Returns the opcode of an instruction.
+    pub fn opcode(&self) -> OPCode {
+        match self {
+            Self::Effect { op, .. } => match op {
+                EffectOp::Call => OPCode::Call,
+                EffectOp::Return => OPCode::Return,
+                EffectOp::Branch => OPCode::Branch,
+                EffectOp::Jump => OPCode::Jump,
+            },
+            Self::Value { op, .. } => match op {
+                ValueOp::Eq => OPCode::Eq,
+                ValueOp::Lt => OPCode::Lt,
+                ValueOp::Gt => OPCode::Gt,
+                ValueOp::Or => OPCode::Or,
+                ValueOp::Id => OPCode::Id,
+                ValueOp::Add => OPCode::Add,
+                ValueOp::Sub => OPCode::Sub,
+                ValueOp::Mul => OPCode::Mul,
+                ValueOp::Div => OPCode::Div,
+                ValueOp::Neq => OPCode::Neq,
+                ValueOp::Lte => OPCode::Lte,
+                ValueOp::Gte => OPCode::Gte,
+                ValueOp::Not => OPCode::Not,
+                ValueOp::Neg => OPCode::Neq,
+                ValueOp::And => OPCode::And,
+                ValueOp::Call => OPCode::Call,
+            },
+            Self::Constant { .. } => OPCode::Const,
+            Self::Label { .. } => OPCode::Label,
         }
     }
 
