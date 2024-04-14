@@ -122,11 +122,11 @@ impl Graph {
     /// Given the list of basic blocks and labels mappings we construct
     /// the control flow graph by building a dictionary of labels to successors
     /// where each successor is one of many possible control flow targets.
-    fn new(program: &Vec<ir::Function>) -> Self {
+    pub fn new(program: &Vec<ir::Function>) -> Self {
         let mut blocks = Vec::new();
         for func in program {
-            let mut fun_blocks = Self::form_basic_blocks(func.instructions());
-            blocks.append(&mut fun_blocks)
+            let mut bbs = Self::form_basic_blocks(func.instructions());
+            blocks.append(&mut bbs)
         }
         Self {
             blocks,
