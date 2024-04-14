@@ -58,7 +58,7 @@ impl BasicBlock {
 impl fmt::Display for BasicBlock {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for inst in &self.instrs {
-            writeln!(f, "{inst}");
+            writeln!(f, "{inst}")?;
         }
         Ok(())
     }
@@ -98,14 +98,14 @@ pub struct Graph {
 
 impl fmt::Display for Graph {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "digraph {} {{", "Example");
+        writeln!(f, "CFG:  {{")?;
         for label in self.labels.keys() {
-            writeln!(f, "      {};", label);
+            writeln!(f, "      {};", label)?;
         }
 
         for (label, succs) in &self.successors {
             for succ in succs {
-                writeln!(f, "       {} -> {};", label, succ);
+                writeln!(f, "       {} -> {};", label, succ)?;
             }
         }
 
@@ -149,11 +149,11 @@ impl Graph {
                 }
             }
             if inst.is_label() {
-                if block.instrs.len() > 0 {
+                if !block.instrs.is_empty() {
                     blocks.push(block)
                 }
                 match inst {
-                    &ir::Instruction::Label { ref name } => {
+                    ir::Instruction::Label { .. } => {
                         block = BasicBlock::new();
                         block.append(inst);
                     }
@@ -167,11 +167,8 @@ impl Graph {
     fn label_blocks(&mut self) {
         for (index, block) in self.blocks.iter().enumerate() {
             if block.instrs[0].is_label() {
-                match block.instrs[0] {
-                    ir::Instruction::Label { ref name } => {
-                        self.labels.insert(name.clone(), BlockRef(index));
-                    }
-                    _ => (),
+                if let ir::Instruction::Label { ref name } = block.instrs[0] {
+                    self.labels.insert(name.clone(), BlockRef(index));
                 }
             } else {
                 let label = format!("_LABEL_AUTO_{}", index);
@@ -192,10 +189,10 @@ impl Graph {
                 .expect("Expected instruction found empty basic block");
 
             match last {
-                ir::Instruction::Effect { args, op } => match last.opcode() {
+                ir::Instruction::Effect { args, .. } => match last.opcode() {
                     ir::OPCode::Jump | ir::OPCode::Branch => {
                         for arg in args {
-                            if let Some(next) = self.labels.get(arg) {
+                            if self.labels.get(arg).is_some() {
                                 succs.push(arg.clone())
                             }
                         }
@@ -207,14 +204,21 @@ impl Graph {
                     if block_ref.0 == self.labels.len() - 1 {
                         succs = vec![]
                     } else {
-                        let block_name = self.labels.iter().find_map(|(k, &val)| {
-                            if val == BlockRef(block_ref.0 + 1) {
-                                Some(k.clone())
-                            } else {
-                                unreachable!("No label found for block {}", block_ref.0 + 1)
-                            }
-                        });
-                        succs = vec![block_name.unwrap()]
+                        let block_name = self
+                            .labels
+                            .iter()
+                            .map(|(k, &v)| {
+                                if v == BlockRef(block_ref.0 + 1) {
+                                    k.clone()
+                                } else {
+                                    unreachable!("No label found for block {}", block_ref.0 + 1)
+                                }
+                            })
+                            .next()
+                            .take();
+                        if let Some(succ) = block_name {
+                            succs = vec![succ.clone()];
+                        }
                     }
                 }
             }
@@ -228,7 +232,7 @@ impl Graph {
 #[cfg(test)]
 mod tests {
     use crate::cfg::Graph;
-    use crate::ir::IRGenerator;
+    use crate::ir::IRBuilder;
     use crate::parser::Parser;
     use crate::scanner::Scanner;
     use crate::sema::analyze;
@@ -246,29 +250,20 @@ mod tests {
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
                 let symbol_table = analyze(parser.ast());
-                println!("Symbol table : {symbol_table}");
 
-                let mut irgen = IRGenerator::new(parser.ast(), &symbol_table);
+                let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
                 irgen.gen();
 
-                // println!("Instructions: ");
-                // for func in irgen.program() {
-                //     println!("{func}");
-                // }
                 let mut graph = Graph::new(irgen.program());
                 graph.label_blocks();
-                // Compuyte successors.
+                // Compute successors.
                 graph.successors();
                 for (label, succs) in &graph.successors {
                     println!("Label {} | Successors {:?}", label, succs)
                 }
 
-                println!("Graph :");
-                println!("{}", graph);
-
                 for (name, block_ref) in &graph.labels {
                     let block = &graph.blocks[block_ref.0];
-                    println!("Block {}", name);
                     for inst in &block.instrs {
                         println!("{}", inst);
                     }

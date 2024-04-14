@@ -136,7 +136,7 @@ impl SymbolTable {
                 Some(idx) => current_scope_table = &self.tables[idx],
                 None => break,
             }
-            idx = idx - 1
+            idx -= 1
         }
         None
     }

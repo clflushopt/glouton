@@ -3,6 +3,6 @@
 //! This module implements multiple transforms on the glouton IR
 //! mostly focused on scalar optimizations.
 
-
-/// So what is a pass ?
+/// `Transform` trait is used to encapsulate the behavior of independant
+/// optimizations executed on individual functions.
 trait Transform {}

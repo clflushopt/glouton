@@ -1,6 +1,6 @@
-//! Global intermediate representation definition and implementation.
+//! Intermediate representation definition and implementation.
 //!
-//! Glouton Intermediate Representation is a linear SSA based intermediate
+//! Glouton Intermediate Representation is a linear SSA oriented intermediate
 //! representation. The intermediate representation is based on Bril and
 //! has three core instruction types, constant operations which produce
 //! constant values, value operations which take operands and produce values
@@ -333,22 +333,19 @@ impl fmt::Display for Instruction {
 impl Instruction {
     /// Returns `true` if the instruction is considered a terminator.
     pub fn is_terminator(&self) -> bool {
-        match self {
-            &Self::Effect { op, .. } => match op {
+        match *self {
+            Self::Effect { op, .. } => match op {
                 EffectOp::Jump | EffectOp::Branch | EffectOp::Return => true,
                 EffectOp::Call => false,
             },
-            &Self::Label { .. } => true,
+            Self::Label { .. } => true,
             _ => false,
         }
     }
 
     /// Returns `true` if the instruction is a label.
     pub fn is_label(&self) -> bool {
-        match self {
-            &Self::Label { .. } => true,
-            _ => false,
-        }
+        matches!(self, &Self::Label { .. })
     }
 
     /// Returns the opcode of an instruction.
@@ -553,20 +550,18 @@ impl Function {
 }
 
 /// Scope of the current AST node we are processing, this is an internal detail
-/// of the `IRGenerator` and is used to decide where the current declaration
-/// lives. This is mostly for global variable declarations.
+/// of the `IRBuilder` and is used to decide where the current declaration will
+/// live.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Scope {
     Global,
     Local,
 }
 
-/// `IRGenerator` generates an intermediate representation by walking the AST
-/// and building a intermediate representation of the original program.
-///
-/// The result of the process is a `Vec` of IR generated functions and a global
-/// scope used to hold global variable declarations.
-pub struct IRGenerator<'a> {
+/// `IRBuilder` is responsible for building the intermediate representation of
+/// an AST. The result of the process is a `Vec` of alll functions defined in
+/// the program and a `Vec` of all the globals declared in the program.
+pub struct IRBuilder<'a> {
     // Program as a sequence of declared functions.
     program: Vec<Function>,
     // Global scope declarations.
@@ -589,7 +584,7 @@ pub struct IRGenerator<'a> {
     symbol_table: &'a SymbolTable,
 }
 
-impl<'a> IRGenerator<'a> {
+impl<'a> IRBuilder<'a> {
     #[must_use]
     pub fn new(ast: &'a ast::AST, symbol_table: &'a sema::SymbolTable) -> Self {
         Self {
@@ -658,7 +653,7 @@ impl<'a> IRGenerator<'a> {
     }
 }
 
-impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
+impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
     fn visit_decl(&mut self, decl: &ast::Decl) -> (Option<String>, Vec<Instruction>) {
         match decl {
             // Function declarations are the only place where we need to switch
@@ -1138,7 +1133,7 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
                     None => unreachable!("Expected a symbol for named expression : `{name}`"),
                 };
                 let (vars, code): (Vec<String>, Vec<Vec<Instruction>>) = args
-                    .into_iter()
+                    .iter()
                     .map(|arg| {
                         if let Some(expr) = self.ast.get_expr(*arg) {
                             let (arg, code) = self.visit_expr(expr);
@@ -1160,7 +1155,7 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRGenerator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ir::IRGenerator;
+    use crate::ir::IRBuilder;
     use crate::parser::Parser;
     use crate::scanner::Scanner;
     use crate::sema::analyze;
@@ -1180,7 +1175,7 @@ mod tests {
                 let symbol_table = analyze(parser.ast());
                 println!("Symbol table : {symbol_table}");
 
-                let mut irgen = IRGenerator::new(parser.ast(), &symbol_table);
+                let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
                 irgen.gen();
 
                 for func in irgen.program() {
