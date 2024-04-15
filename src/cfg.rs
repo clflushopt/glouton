@@ -31,6 +31,8 @@ pub struct EdgeRef(usize);
 /// is executed on that particular edge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BasicBlock {
+    // BlockID, assigned during initialization.
+    id: BlockRef,
     // Instructions that constitute the basic block.
     instrs: Vec<ir::Instruction>,
     // Set of possible entry edges.
@@ -43,10 +45,21 @@ impl BasicBlock {
     /// Create a new `BasicBlock` instance.
     fn new() -> Self {
         Self {
+            id: BlockRef(0),
             instrs: Vec::new(),
             entry_points: Vec::new(),
             exit_points: Vec::new(),
         }
+    }
+
+    /// Return a non-mutable reference to the block leader.
+    fn leader(&self) -> Option<&ir::Instruction> {
+        self.instrs.first()
+    }
+
+    /// Returns a non-mutable reference to the block terminator.
+    fn terminator(&self) -> Option<&ir::Instruction> {
+        self.instrs.last()
     }
 
     /// Append an instruction to the basic block.
@@ -81,18 +94,22 @@ pub enum Edge {
     },
 }
 
-/// `ControlFlowGraph` is the control flow graph built from the `AbstractProgram`
-/// representation and used for analysis and optimization passes.
+/// A control flow graph constructed from a linear representation.
 pub struct Graph {
-    // Nodes in the control flow graph constructed from the AST.
+    /// Nodes in the CFG.
     blocks: Vec<BasicBlock>,
-    // Mapping from labels to blocks, this constructed during basic block
-    // formation and then updated when we build a control flow graph assigning
-    // one label for each block.
-    labels: HashMap<String, BlockRef>,
-    // Edges in the control flow graph.
+    /// Edges in the CFG.
     edges: Vec<Edge>,
-    // Successors map.
+    // Mapping from labels to blocks built during the initial basic blocks
+    // construction pass and then updated during the control flow graph pass
+    // where blocks that don't have a label originally (non-target blocks) are
+    // assigned a label.
+    // TODO: Since we already have the notion of `BlockRef` refactor this
+    // to get rid of `String` in both the keys and values.
+    labels: HashMap<String, BlockRef>,
+    // Successors of each basic block.
+    // TODO: Since we already have the notion of `BlockRef` refactor this
+    // to get rid of `String` in both the keys and values.
     successors: HashMap<String, Vec<String>>,
 }
 
@@ -124,8 +141,8 @@ impl Graph {
     /// where each successor is one of many possible control flow targets.
     pub fn new(program: &Vec<ir::Function>) -> Self {
         let mut blocks = Vec::new();
-        for func in program {
-            let mut bbs = Self::form_basic_blocks(func.instructions());
+        for function in program {
+            let mut bbs = Self::construct_basic_blocks(function.instructions());
             blocks.append(&mut bbs)
         }
         Self {
@@ -136,8 +153,11 @@ impl Graph {
         }
     }
 
-    /// Construct basic blocks from a list of instructions.
-    fn form_basic_blocks(instrs: &[ir::Instruction]) -> Vec<BasicBlock> {
+    /// Construct basic blocks from a list of instructions, the algorithm
+    /// proceeds by iterating over the list of instructions and collecting
+    /// leaders. Leaders are the first instructions in a basic block and
+    /// we assign them based on whether the previous instruction terminates.
+    fn construct_basic_blocks(instrs: &[ir::Instruction]) -> Vec<BasicBlock> {
         let mut blocks = Vec::new();
         let mut block = BasicBlock::new();
         for inst in instrs {
@@ -163,8 +183,10 @@ impl Graph {
         }
         blocks
     }
-    /// Build a map from labels to blocks.
-    fn label_blocks(&mut self) {
+    /// Iterate over all the constructed basic blocks and assign them a label
+    /// if they don't have one. Blocks that are control flow target will always
+    /// have a label instruction as a leader.
+    fn assign_labels_to_blocks(&mut self) {
         for (index, block) in self.blocks.iter().enumerate() {
             if block.instrs[0].is_label() {
                 if let ir::Instruction::Label { ref name } = block.instrs[0] {
@@ -177,7 +199,7 @@ impl Graph {
         }
     }
 
-    /// Produce a list of succesors for each basic block.
+    /// Compute a list of succesors for each basic block in the graph.
     fn successors(&mut self) {
         let mut successors = HashMap::new();
 
@@ -224,7 +246,6 @@ impl Graph {
             }
             successors.insert(label.clone(), succs);
         }
-
         self.successors = successors
     }
 }
@@ -253,6 +274,11 @@ mod tests {
 
                 let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
                 irgen.gen();
+                println!("======== FUNCTIONS ========");
+                println!("{:?}", irgen.program());
+                println!("======== GLOBALS ========");
+                println!("{:?}", irgen.globals());
+                println!("========  END  ========");
 
                 let mut graph = Graph::new(irgen.program());
                 graph.label_blocks();

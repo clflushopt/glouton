@@ -559,29 +559,30 @@ enum Scope {
 }
 
 /// `IRBuilder` is responsible for building the intermediate representation of
-/// an AST. The result of the process is a `Vec` of alll functions defined in
+/// an AST. The result of the process is a `Vec` of all functions defined in
 /// the program and a `Vec` of all the globals declared in the program.
 pub struct IRBuilder<'a> {
+    // Reference to the AST we are processing.
+    ast: &'a ast::AST,
+    // Symbol table built during semantic analysis phase.
+    symbol_table: &'a SymbolTable,
     // Program as a sequence of declared functions.
     program: Vec<Function>,
     // Global scope declarations.
     globals: Vec<Instruction>,
-    // Variable counter used to create new variables.
+    // Counter used to keep track of temporaries, temporaries are storage
+    // assignemnts for transient or non assigned values such as a literals.
     var_count: u32,
-    // Label counter used to create new labels.
+    // Counter used to keep track of labels used as jump targets.
     label_count: u32,
     // Index in the `program` of the current function we are building.
     curr: usize,
     // Current scope.
     scope: Scope,
-    // Symbol table level we are at current, increments by 1 when we enter
+    // Symbol table level we are at currently, increments by 1 when we enter
     // a scope and decrements by 1 when we exit. This is used to set the
     // starting point when resolving symbols in the symbol table.
     level: usize,
-    // Reference to the AST we are processing.
-    ast: &'a ast::AST,
-    // Symbol table built during semantic analysis phase.
-    symbol_table: &'a SymbolTable,
 }
 
 impl<'a> IRBuilder<'a> {
@@ -605,6 +606,11 @@ impl<'a> IRBuilder<'a> {
         &self.program
     }
 
+    /// Returns a non-mutable reference to the program globals.
+    pub const fn globals(&self) -> &Vec<Instruction> {
+        &self.globals
+    }
+
     /// Returns a fresh variable name, used for intermediate literals.
     fn next_var(&mut self) -> String {
         let var = format!("v{}", self.var_count);
@@ -623,9 +629,16 @@ impl<'a> IRBuilder<'a> {
     fn push(&mut self, inst: Instruction) {
         match self.scope {
             Scope::Local => self.program[self.curr].push(inst),
-            // TODO: assert that the instruction is not illegal in the global
-            // scope i.e (not a branch for e.x)
-            Scope::Global => self.globals.push(inst),
+            Scope::Global => {
+                // The only instruction allowed in the global scope is
+                // the constant instruction.
+                assert!(
+                    inst.opcode() == OPCode::Const || inst.opcode() == OPCode::Id,
+                    "found {:?} ",
+                    inst.opcode()
+                );
+                self.globals.push(inst)
+            }
         }
     }
 
@@ -645,10 +658,7 @@ impl<'a> IRBuilder<'a> {
 
     pub fn gen(&mut self) {
         for decl in self.ast.declarations() {
-            let (_, code) = self.visit_decl(decl);
-            for inst in code {
-                self.push(inst)
-            }
+            let _ = self.visit_decl(decl);
         }
     }
 }
@@ -809,9 +819,15 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     unreachable!("Expected reference to block to be a valid statement")
                 };
                 code.append(&mut block);
-                // Push jump to end.
-                let inst = Instruction::jmp(end_label.clone());
-                code.push(inst);
+                // Push a jump instruction to the end label iif the last
+                // instruction was not a return..
+                if code.last().is_some_and(|inst| match inst.opcode() {
+                    OPCode::Return => false,
+                    _ => true,
+                }) {
+                    let inst = Instruction::jmp(end_label.clone());
+                    code.push(inst);
+                }
                 // Push else label.
                 let inst = Instruction::label(else_label);
                 code.push(inst);
@@ -827,9 +843,15 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     };
                     code.append(&mut block);
                 }
-                // Push jump to end.
-                let inst = Instruction::jmp(end_label.clone());
-                code.push(inst);
+                // Push a jump instruction to the end label iif the last
+                // instruction was not a return..
+                if code.last().is_some_and(|inst| match inst.opcode() {
+                    OPCode::Return => false,
+                    _ => true,
+                }) {
+                    let inst = Instruction::jmp(end_label.clone());
+                    code.push(inst);
+                }
                 // Push end label.
                 let inst = Instruction::label(end_label);
                 code.push(inst);
