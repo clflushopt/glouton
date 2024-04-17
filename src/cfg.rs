@@ -11,12 +11,6 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BlockRef(usize);
 
-/// We also expose a handle to edges in the graph, since our edges are enums
-/// that hold data (instruction, labels...) they need to have their own storage
-/// in the graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct EdgeRef(usize);
-
 /// `BasicBlock` is the atomic unit of the graph IR and represent a node in
 /// the control flow graph. Each basic block represent a single block of
 /// instructions assumed to execute sequentially, branches, indirect jumps
@@ -36,9 +30,9 @@ pub struct BasicBlock {
     // Instructions that constitute the basic block.
     instrs: Vec<ir::Instruction>,
     // Set of possible entry edges.
-    entry_points: Vec<EdgeRef>,
+    entry_points: Vec<BlockRef>,
     // Set of possible exit edges.
-    exit_points: Vec<EdgeRef>,
+    exit_points: Vec<BlockRef>,
 }
 
 impl BasicBlock {
@@ -141,10 +135,12 @@ impl Graph {
     /// where each successor is one of many possible control flow targets.
     pub fn new(program: &Vec<ir::Function>) -> Self {
         let mut blocks = Vec::new();
+
         for function in program {
             let mut bbs = Self::construct_basic_blocks(function.instructions());
             blocks.append(&mut bbs)
         }
+
         Self {
             blocks,
             labels: HashMap::new(),
@@ -206,8 +202,7 @@ impl Graph {
         for (label, block_ref) in &self.labels {
             let mut succs = vec![];
             let last = self.blocks[block_ref.0]
-                .instrs
-                .last()
+                .terminator()
                 .expect("Expected instruction found empty basic block");
 
             match last {
@@ -281,7 +276,7 @@ mod tests {
                 println!("========  END  ========");
 
                 let mut graph = Graph::new(irgen.program());
-                graph.label_blocks();
+                graph.assign_labels_to_blocks();
                 // Compute successors.
                 graph.successors();
                 for (label, succs) in &graph.successors {

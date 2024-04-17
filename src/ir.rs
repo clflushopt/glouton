@@ -543,7 +543,7 @@ impl Function {
         self.body.push(inst)
     }
 
-    /// Return a reference to the function instructions.
+    /// Return a non-mutable reference to the function instructions.
     pub fn instructions(&self) -> &Vec<Instruction> {
         &self.body
     }

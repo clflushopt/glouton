@@ -8,17 +8,18 @@
 * Def-Use
 * Alias Analysis
 
-
 # Optimizations in Glouton
 
-* Dead Code Elimination (happens implicitly)
-* Constant Folding (happens on the fly)
-* Local Common Subexpression Elimination (happens on the fly)
-* Arithmetic Identities (happens on the fly)
+* Dead Code Elimination 
+* Constant Folding
+* Instruction Simplifcation
+* Instruction Combination
+* Local Common Subexpression Elimination
+* Arithmetic Identities
 * Unreachable Code Elimination
 * Global Common Subexpression Elimination
 * Code Placement
-* Operator Strength Reduction
+* Strength Reduction
 * Scalar Replacement
 * Load/Store Optimisation
 * Control Flow Optimisations
