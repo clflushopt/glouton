@@ -216,9 +216,6 @@ impl ValueOp {
     }
 }
 
-/// Instructions are the atomic operations of the linear IR part in GIR
-/// they compose the building blocks of the graph based IR.
-///
 /// Instructions in GIR are split into three groups, each group describe a set
 /// of behaviors that the instructions implement.
 ///
