@@ -182,3 +182,118 @@ void shroump() {
 
 ```
 
+#### Constant Propagation
+
+Often combined or run after constant folding, constant propagation propagates constant values
+assigned to a variable to all variable uses. The substitution can be done within basic blocks
+or within entire function via their control flow graph.
+
+```c
+
+int x = 1337;
+int y = 31337;
+
+int u = x + 4;
+int v = y + 7;
+
+```
+
+Becomes
+
+```c
+
+int x = 1337;
+int y = 31337;
+
+int u = 1341;
+int v = 31344;
+
+```
+
+#### Common Subexpression Elimination
+
+In CSE the pass replaces previously computed expressions by their values instead of explicitely
+recomputing them. This analogous to function inlining but done on individual expressions, CSE
+can be performed on all primitive data types, operators and storage locations.
+
+```c
+
+int enhance(int a, int b) {
+  int x = a + b + 1;
+  int z = a + b - 2;
+
+  return x + z;
+}
+
+```
+
+```c
+
+int enhance(int a, int b) {
+  int tmp = a + b;
+  int x = tmp + 1;
+  int z = tmp - 2;
+
+  return x + z;
+}
+
+```
+
+#### Dead Code Elimination
+
+The DCE pass eliminates any basic block or instructions within a basic block that are :
+
+1. Considered unreachable.
+2. Does not affect uses or definitions in other locations.
+3. Unused.
+
+```c
+
+// Because the use locations of the variable is unreachable this is also unused.
+const char* glob = "/*";
+// Unused variable.
+const int tz = 31337;
+
+void drums() {
+  int ii;
+  int jj;
+  goto .L2;
+  // The following are dead stores.
+  ii = 1;
+  jj = 0;
+
+.L2:
+  return;
+  // This entire section is unreachable due to the previous return.
+  if (*glob[1] == '*') {
+    return;
+  }
+}
+
+```
+
+Becomes
+
+```c
+
+void drums() {
+  return
+}
+
+
+```
+
+DCE pass is highly ubiquitous and is often executed after other passes such as constant folding
+or constant propagation or CSE, ideally you want to run the pass as often as you can to eliminate
+any possible dead code that is either the result of other optimization passes or analyses.
+
+#### Peephole Optimizations
+
+Peephole optimizations is not a single pass but rather a collection of "tricks" that are used
+to transform existing instructions to an equivalent set of instructions that has better performance
+some transformations are pretty general for example replacing multiplication by 2 by an addition
+others are architecture dependant.
+
+Most of the techniques we mentionned above are considered peephole optimizations, other examples
+of peephole optimizations are such as the ones described [here](https://graphics.stanford.edu/~seander/bithacks.html).
+
