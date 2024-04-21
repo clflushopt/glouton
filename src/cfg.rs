@@ -46,14 +46,30 @@ impl BasicBlock {
         }
     }
 
-    /// Return a non-mutable reference to the block leader.
-    fn leader(&self) -> Option<&ir::Instruction> {
+    /// Returns the number of instructions in the block.
+    pub fn len(&self) -> usize {
+        self.instrs.len()
+    }
+
+    /// Returns a non-mutable reference to the block leader.
+    pub fn leader(&self) -> Option<&ir::Instruction> {
         self.instrs.first()
     }
 
     /// Returns a non-mutable reference to the block terminator.
-    fn terminator(&self) -> Option<&ir::Instruction> {
+    pub fn terminator(&self) -> Option<&ir::Instruction> {
         self.instrs.last()
+    }
+
+    /// Returns a non-mutable reference to the block instructions.
+    pub fn instructions(&self) -> &Vec<ir::Instruction> {
+        &self.instrs
+    }
+
+    /// Drop the instruction at the given index and return it, has the same
+    /// semantics as `Vec::remove`.
+    pub fn remove(&mut self, index: usize) -> ir::Instruction {
+        self.instrs.remove(index)
     }
 
     /// Append an instruction to the basic block.
@@ -110,13 +126,13 @@ pub struct Graph {
 impl fmt::Display for Graph {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "CFG:  {{")?;
-        for label in self.labels.keys() {
+        for (label, _) in &self.labels {
             writeln!(f, "      {};", label)?;
         }
 
         for (label, succs) in &self.successors {
             for succ in succs {
-                writeln!(f, "       {} -> {};", label, succ)?;
+                writeln!(f, "      {} -> {};", label, succ)?;
             }
         }
 
@@ -133,11 +149,28 @@ impl Graph {
     /// Given the list of basic blocks and labels mappings we construct
     /// the control flow graph by building a dictionary of labels to successors
     /// where each successor is one of many possible control flow targets.
+    ///
+    /// Algorithm to form control flow graph, proceeds by connecting the basic
+    /// blocks with each other using either :
+    ///
+    /// 1. Branch targets if the last instruction is a conditional branch.
+    /// 2. Jump target if the last instruction is a conditional branch.
+    /// 3. The next block in the list if the next instruction is neither of
+    ///    the previous two.
+    ///
+    /// for block in blocks:
+    ///     if block.last().is_branch():
+    ///         add_edge(block, block.last().then_target())
+    ///         add_edge(block, block.last().else_target())
+    ///     if block.last().is_jump():
+    ///         add_edge(block, block.last().target())
+    ///     else:
+    ///         add_edge(block, blocks.next())?
     pub fn new(program: &Vec<ir::Function>) -> Self {
-        let mut blocks = Vec::new();
+        let mut blocks: Vec<BasicBlock> = Vec::new();
 
         for function in program {
-            let mut bbs = Self::construct_basic_blocks(function.instructions());
+            let mut bbs = Self::form_basic_blocks(function.instructions());
             blocks.append(&mut bbs)
         }
 
@@ -153,17 +186,10 @@ impl Graph {
     /// proceeds by iterating over the list of instructions and collecting
     /// leaders. Leaders are the first instructions in a basic block and
     /// we assign them based on whether the previous instruction terminates.
-    fn construct_basic_blocks(instrs: &[ir::Instruction]) -> Vec<BasicBlock> {
+    pub fn form_basic_blocks(instrs: &[ir::Instruction]) -> Vec<BasicBlock> {
         let mut blocks = Vec::new();
         let mut block = BasicBlock::new();
         for inst in instrs {
-            if !inst.is_label() {
-                block.append(inst);
-                if inst.is_terminator() {
-                    blocks.push(block);
-                    block = BasicBlock::new();
-                }
-            }
             if inst.is_label() {
                 if !block.instrs.is_empty() {
                     blocks.push(block)
@@ -174,6 +200,12 @@ impl Graph {
                         block.append(inst);
                     }
                     _ => unreachable!(),
+                }
+            } else {
+                block.append(inst);
+                if inst.is_terminator() {
+                    blocks.push(block);
+                    block = BasicBlock::new();
                 }
             }
         }
@@ -270,12 +302,12 @@ mod tests {
                 let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
                 irgen.gen();
                 println!("======== FUNCTIONS ========");
-                println!("{:?}", irgen.program());
+                println!("{:?}", irgen.functions());
                 println!("======== GLOBALS ========");
                 println!("{:?}", irgen.globals());
                 println!("========  END  ========");
 
-                let mut graph = Graph::new(irgen.program());
+                let mut graph = Graph::new(irgen.functions());
                 graph.assign_labels_to_blocks();
                 // Compute successors.
                 graph.successors();
@@ -289,6 +321,8 @@ mod tests {
                         println!("{}", inst);
                     }
                 }
+                println!("======== CFG ========");
+                println!("{}", graph);
             }
         };
     }

@@ -1,14 +1,33 @@
-//! Glouton IR optimization passes.
-//!
 //! This module implements multiple transforms on the glouton IR
 //! mostly focused on scalar optimizations.
 
-use crate::ir;
+use std::collections::HashSet;
+
+use crate::{
+    cfg::Graph,
+    ir::{self, Instruction},
+};
 
 /// `Transform` trait is used to encapsulate the behavior of independant
 /// optimizations executed on individual functions.
 trait Transform {
     fn run(function: &mut ir::Function) {}
+}
+
+/// Identity transform implements the `Transform` interface but actually
+/// does nothing.
+#[derive(Default, Debug)]
+struct Identity {}
+
+impl Transform for Identity {
+    fn run(function: &mut ir::Function) {
+        // Get a list of basic blocks.
+        let bbs = Graph::form_basic_blocks(function.instructions());
+
+        for bb in bbs {
+            println!("{}", bb)
+        }
+    }
 }
 
 /// Instruction combination pass executes over basic blocks and tries to
@@ -40,7 +59,66 @@ impl Transform for CSE {}
 /// remain unchanged after a pass.
 struct DCE {}
 
-impl Transform for DCE {}
+impl DCE {
+    /// Trivial DCE pass on a function returns `true` if any instructions are
+    /// eliminated.
+    pub fn tdce(function: &mut ir::Function) -> bool {
+        let mut elim = false;
+        println!("Starting tdce: eliminate {}", elim);
+        // Get a list of basic blocks.
+        let mut bbs = Graph::form_basic_blocks(function.instructions());
+        // List of defs which are just variable definitions in a block.
+        let mut use_defs: HashSet<String> = HashSet::new();
+
+        // Mark all the instruction args as used.
+        for bb in &bbs {
+            for inst in bb.instructions() {
+                // Check for instruction uses, if an instruction is uses defs
+                // we remove them from the `defs` set.
+                match inst.args() {
+                    Some(args) => args.iter().for_each(|arg| {
+                        use_defs.insert(arg.clone());
+                    }),
+                    _ => (),
+                }
+            }
+        }
+
+        for bb in &mut bbs {
+            // Number of candidate instructions for elimination is initially set
+            // to the number of instructions in the block since we will at most
+            // eliminate all instructions in the block.
+            let n_elim_candidates = bb.len();
+            let mut droppable = vec![];
+            // Create a local copy of the basic block we are processing.
+            for (index, inst) in bb.instructions().iter().enumerate() {
+                if inst.dst().is_some_and(|dst| !use_defs.contains(dst)) {
+                    println!("Dropping {}", inst);
+                    droppable.push(index);
+                }
+            }
+
+            for idx in droppable {
+                bb.remove(idx);
+            }
+
+            println!("Post basic block: {}", bb);
+            elim = bb.len() != n_elim_candidates;
+        }
+
+        println!("Finished tdce: eliminate {}", elim);
+        elim
+    }
+}
+
+impl Transform for DCE {
+    // The DCE pass will iteratively run over a given basic block until
+    // it converges. The pass converges when the number of eliminated
+    // instructions reaches 0.
+    fn run(function: &mut ir::Function) {
+        Self::tdce(function);
+    }
+}
 
 /// Strength reduction pass replaces some computations with cheaper and more
 /// efficient equivalent alternatives.
@@ -53,3 +131,61 @@ impl Transform for StrengthReduce {}
 struct LoopInvariantCodeMotion {}
 
 impl Transform for LoopInvariantCodeMotion {}
+
+#[cfg(test)]
+mod tests {
+    use crate::ir::IRBuilder;
+    use crate::optim::{Identity, Transform, DCE};
+    use crate::parser::Parser;
+    use crate::scanner::Scanner;
+    use crate::sema::analyze;
+    // Macro to generate test cases.
+    macro_rules! test_optimization_pass {
+        ($name:ident, $source:expr, $expected:expr) => {
+            #[test]
+            fn $name() {
+                let source = $source;
+                let mut scanner = Scanner::new(source);
+                let tokens = scanner
+                    .scan()
+                    .expect("expected test case source to be valid");
+                let mut parser = Parser::new(&tokens);
+                parser.parse();
+                let symbol_table = analyze(parser.ast());
+                println!("Symbol table : {symbol_table}");
+
+                let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
+                irgen.gen();
+
+                for mut func in irgen.functions_mut() {
+                    Identity::run(&mut func);
+                    DCE::run(&mut func);
+                }
+            }
+        };
+    }
+
+    test_optimization_pass!(
+        can_do_nothing_on_input_program,
+        r#"
+            int main() {
+                return 42;
+            }
+        "#,
+        &vec![]
+    );
+
+    test_optimization_pass!(
+        can_trivially_dce_dead_store,
+        r#"
+            int main() {
+                int a = 4;
+                int b = 2;
+                int c = 1;
+                int d = a + b;
+                return d;
+            }
+        "#,
+        &vec![]
+    );
+}

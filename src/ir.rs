@@ -377,6 +377,22 @@ impl Instruction {
         }
     }
 
+    /// Returns the destination of the instruction if there is one.
+    pub fn dst(&self) -> Option<&String> {
+        match self {
+            Instruction::Constant { dst, .. } | Instruction::Value { dst, .. } => Some(dst),
+            _ => None,
+        }
+    }
+
+    /// Returns the arguments of an instruction if there are any.
+    pub fn args(&self) -> Option<&Vec<String>> {
+        match self {
+            Instruction::Effect { args, .. } | Instruction::Value { args, .. } => Some(args),
+            _ => None,
+        }
+    }
+
     /// Emit a constant instruction.
     fn constant(dst: String, const_type: Type, value: Literal) -> Instruction {
         Instruction::Constant {
@@ -598,9 +614,14 @@ impl<'a> IRBuilder<'a> {
         }
     }
 
-    /// Returns a non-mutable reference to the generated program.
-    pub const fn program(&self) -> &Vec<Function> {
+    /// Returns a non-mutable reference to the program functions.
+    pub const fn functions(&self) -> &Vec<Function> {
         &self.program
+    }
+
+    /// Returns a mutable reference to the program functions.
+    pub fn functions_mut(&mut self) -> &mut Vec<Function> {
+        self.program.as_mut()
     }
 
     /// Returns a non-mutable reference to the program globals.
@@ -1197,7 +1218,7 @@ mod tests {
                 let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
                 irgen.gen();
 
-                for func in irgen.program() {
+                for func in irgen.functions() {
                     println!("{func}");
                 }
             }
