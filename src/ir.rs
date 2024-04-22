@@ -345,7 +345,7 @@ impl Instruction {
         matches!(self, &Self::Label { .. })
     }
 
-    /// Returns the opcode of an instruction.
+    /// Return the instruction's opcode..
     pub fn opcode(&self) -> OPCode {
         match self {
             Self::Effect { op, .. } => match op {

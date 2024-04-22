@@ -5,13 +5,21 @@ use std::collections::HashSet;
 
 use crate::{
     cfg::Graph,
-    ir::{self, Instruction},
+    ir::{self, Function, Instruction},
 };
+
+struct FunctionRewriter {}
+
+impl FunctionRewriter {
+    fn rewrite(f: &mut ir::Function, transform: &impl Transform) {
+        transform.run(f)
+    }
+}
 
 /// `Transform` trait is used to encapsulate the behavior of independant
 /// optimizations executed on individual functions.
-trait Transform {
-    fn run(function: &mut ir::Function) {}
+pub trait Transform {
+    fn run(&self, function: &mut ir::Function) {}
 }
 
 /// Identity transform implements the `Transform` interface but actually
@@ -20,7 +28,7 @@ trait Transform {
 struct Identity {}
 
 impl Transform for Identity {
-    fn run(function: &mut ir::Function) {
+    fn run(&self, function: &mut ir::Function) {
         // Get a list of basic blocks.
         let bbs = Graph::form_basic_blocks(function.instructions());
 
@@ -106,6 +114,7 @@ impl DCE {
             elim = bb.len() != n_elim_candidates;
         }
 
+        // NOTE: Need to mutate function ideally ?
         println!("Finished tdce: eliminate {}", elim);
         elim
     }
@@ -115,7 +124,7 @@ impl Transform for DCE {
     // The DCE pass will iteratively run over a given basic block until
     // it converges. The pass converges when the number of eliminated
     // instructions reaches 0.
-    fn run(function: &mut ir::Function) {
+    fn run(&self, function: &mut ir::Function) {
         Self::tdce(function);
     }
 }
@@ -157,9 +166,12 @@ mod tests {
                 let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
                 irgen.gen();
 
+                let ident = Identity {};
+                let dce = DCE {};
+
                 for mut func in irgen.functions_mut() {
-                    Identity::run(&mut func);
-                    DCE::run(&mut func);
+                    ident.run(&mut func);
+                    dce.run(&mut func);
                 }
             }
         };
