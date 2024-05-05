@@ -1213,7 +1213,7 @@ mod tests {
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
                 let symbol_table = analyze(parser.ast());
-                println!("Symbol table : {symbol_table}");
+                println!("{symbol_table}");
 
                 let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
                 irgen.gen();
@@ -1305,7 +1305,7 @@ mod tests {
             int b = 17;
             if (a > b) {
                 return a - b;
-            } 
+            }
             return a + b;
         }
         "#,

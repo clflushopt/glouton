@@ -96,7 +96,7 @@ impl DCE {
             // Number of candidate instructions for elimination is initially set
             // to the number of instructions in the block since we will at most
             // eliminate all instructions in the block.
-            let n_elim_candidates = bb.len();
+            let mut n_elim_candidates = bb.len();
             let mut droppable = vec![];
             // Create a local copy of the basic block we are processing.
             for (index, inst) in bb.instructions().iter().enumerate() {
@@ -108,9 +108,11 @@ impl DCE {
 
             for idx in droppable {
                 bb.remove(idx);
+                // Decrement the number of elimnated candidates.
+                n_elim_candidates -= 1;
             }
 
-            println!("Post basic block: {}", bb);
+            println!("Post basic block:\n{}", bb);
             elim = bb.len() != n_elim_candidates;
         }
 
@@ -125,7 +127,7 @@ impl Transform for DCE {
     // it converges. The pass converges when the number of eliminated
     // instructions reaches 0.
     fn run(&self, function: &mut ir::Function) {
-        Self::tdce(function);
+        while Self::tdce(function) {}
     }
 }
 
@@ -161,7 +163,7 @@ mod tests {
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
                 let symbol_table = analyze(parser.ast());
-                println!("Symbol table : {symbol_table}");
+                println!("{symbol_table}");
 
                 let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
                 irgen.gen();

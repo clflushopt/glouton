@@ -211,6 +211,7 @@ impl Graph {
         }
         blocks
     }
+
     /// Iterate over all the constructed basic blocks and assign them a label
     /// if they don't have one. Blocks that are control flow target will always
     /// have a label instruction as a leader.
@@ -349,7 +350,7 @@ mod tests {
             int b = 17;
             if (a > b) {
                 return a - b;
-            } 
+            }
             return a + b;
         }
         "#,
