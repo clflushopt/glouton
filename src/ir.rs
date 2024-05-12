@@ -74,12 +74,15 @@ impl fmt::Display for Literal {
 pub enum ConstOp {
     /// `const` operation.
     Const,
+    /// `nop` operation.
+    Nop,
 }
 
 impl fmt::Display for ConstOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Const => write!(f, "const"),
+            Self::Nop => write!(f, "nop"),
         }
     }
 }
@@ -508,7 +511,7 @@ pub struct Function {
     // List of arguments the function accepts.
     args: Vec<Argument>,
     // Body of the function as GIR instructions.
-    body: Vec<Instruction>,
+    pub body: Vec<Instruction>,
     // Return type of the function if any.
     return_type: Type,
 }
@@ -559,6 +562,16 @@ impl Function {
     /// Return a non-mutable reference to the function instructions.
     pub fn instructions(&self) -> &Vec<Instruction> {
         &self.body
+    }
+
+    /// Insert the instruction at the given position.
+    pub fn insert(&mut self, inst: &Instruction, pos: usize) {
+        self.body.insert(pos, inst.clone())
+    }
+
+    /// Remove the instruction at the given position.
+    pub fn remove(&mut self, pos: usize) {
+        let _ = self.body.remove(pos);
     }
 }
 

@@ -71,6 +71,7 @@ impl DCE {
     /// Trivial DCE pass on a function returns `true` if any instructions are
     /// eliminated.
     pub fn tdce(function: &mut ir::Function) -> bool {
+        let orig = function.instructions().len();
         let mut elim = false;
         println!("Starting tdce: eliminate {}", elim);
         // Get a list of basic blocks.
@@ -113,19 +114,33 @@ impl DCE {
             }
 
             println!("Post basic block:\n{}", bb);
-            elim = bb.len() != n_elim_candidates;
         }
 
-        // NOTE: Need to mutate function ideally ?
+        // "Package" back the basic blocks into the parent function.
+        // TODO: This is quite possibly the worst way to do this ideally
+        // each `instruction` should hold a reference to its `parent`
+        // basic block and a location into the parent function.
+        // But that's a bigger change so for now, re-write the function.
+        let mut dced = vec![];
+
+        for bb in &bbs {
+            for inst in bb.instructions() {
+                dced.push(inst.clone())
+            }
+        }
+        elim = dced.len() < orig;
+
         println!("Finished tdce: eliminate {}", elim);
+
+        function.body = dced;
         elim
     }
 }
 
 impl Transform for DCE {
-    // The DCE pass will iteratively run over a given basic block until
-    // it converges. The pass converges when the number of eliminated
-    // instructions reaches 0.
+    /// Run dead code elimination over a function repeatedly until all
+    /// convergence. The pass convergences when the number of candidates
+    /// for elimination reaches 0.
     fn run(&self, function: &mut ir::Function) {
         while Self::tdce(function) {}
     }
