@@ -66,10 +66,21 @@ impl BasicBlock {
         &self.instrs
     }
 
+    /// Returns a mutable reference to the block instructions.
+    pub fn instructions_mut(&mut self) -> &mut Vec<ir::Instruction> {
+        &mut self.instrs
+    }
+
     /// Drop the instruction at the given index and return it, has the same
     /// semantics as `Vec::remove`.
     pub fn remove(&mut self, index: usize) -> ir::Instruction {
         self.instrs.remove(index)
+    }
+
+    /// Kill the instruction at the given index by swapping it with a `Nop`.
+    pub fn kill(&mut self, index: usize) -> ir::Instruction {
+        assert!(index < self.instrs.len());
+        std::mem::replace(&mut self.instrs[index], ir::Instruction::Nop)
     }
 
     /// Append an instruction to the basic block.

@@ -102,21 +102,28 @@ impl DCE {
             // Create a local copy of the basic block we are processing.
             for (index, inst) in bb.instructions().iter().enumerate() {
                 if inst.dst().is_some_and(|dst| !use_defs.contains(dst)) {
-                    println!("Dropping {}", inst);
+                    // println!("Dropping {}", inst);
                     droppable.push(index);
                 }
             }
+            println!("Block before killing dead instructions : {}", bb);
 
+            // We can't drop instructiosn iteratively with `remove` as it will
+            // invalidate the indices storred in `droppable`. So we use a trick
+            // where we swap dead instructions with `Nop` and run the `NopElim`
+            // pass. (Currently the `NopElim` pass is just a loop but ideally
+            // should be extracted to its own pass.
             for idx in droppable {
-                bb.remove(idx);
+                // println!("Killing instruction @ {idx}");
+                bb.kill(idx);
                 // Decrement the number of elimnated candidates.
                 n_elim_candidates -= 1;
             }
-
-            println!("Post basic block:\n{}", bb);
+            println!("Block after killing dead instructions : {}", bb);
         }
 
         // "Package" back the basic blocks into the parent function.
+        //
         // TODO: This is quite possibly the worst way to do this ideally
         // each `instruction` should hold a reference to its `parent`
         // basic block and a location into the parent function.
@@ -125,6 +132,10 @@ impl DCE {
 
         for bb in &bbs {
             for inst in bb.instructions() {
+                match inst {
+                    Instruction::Nop => continue,
+                    _ => dced.push(inst.clone()),
+                }
                 dced.push(inst.clone())
             }
         }
@@ -187,8 +198,14 @@ mod tests {
                 let dce = DCE {};
 
                 for mut func in irgen.functions_mut() {
+                    println!("Pre-Pass function: {}", func);
+                }
+                for mut func in irgen.functions_mut() {
                     ident.run(&mut func);
                     dce.run(&mut func);
+                }
+                for mut func in irgen.functions_mut() {
+                    println!("Post-Pass function: {}", func);
                 }
             }
         };
@@ -213,6 +230,25 @@ mod tests {
                 int c = 1;
                 int d = a + b;
                 return d;
+            }
+        "#,
+        &vec![]
+    );
+
+    test_optimization_pass!(
+        can_trivially_dce_dead_blocks,
+        r#"
+            int main() {
+                int a = 42;
+                if (a > 43) {
+                    int b = 313;
+                    int c = 212;
+                    int d = 111;
+                    int e = 414;
+                    int f = 515;
+                    int g = 616;
+                }
+                return a;
             }
         "#,
         &vec![]

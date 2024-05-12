@@ -5,7 +5,7 @@
 //! has three core instruction types, constant operations which produce
 //! constant values, value operations which take operands and produce values
 //! and effect based operations which take operands and produce no values.
-use std::fmt;
+use std::fmt::{self, write};
 
 use crate::{
     ast::{self, Visitor},
@@ -49,8 +49,11 @@ impl Type {
 }
 
 /// Literal values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Literal {
+    /// Empty value.
+    #[default]
+    Empty,
     /// Integers
     Int(i32),
     /// Booleans.
@@ -62,6 +65,7 @@ pub enum Literal {
 impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Empty => write!(f, "NONE"),
             Self::Int(value) => write!(f, "{value}"),
             Self::Bool(value) => write!(f, "{value}"),
             Self::Char(value) => write!(f, "{value}"),
@@ -74,15 +78,12 @@ impl fmt::Display for Literal {
 pub enum ConstOp {
     /// `const` operation.
     Const,
-    /// `nop` operation.
-    Nop,
 }
 
 impl fmt::Display for ConstOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Const => write!(f, "const"),
-            Self::Nop => write!(f, "nop"),
         }
     }
 }
@@ -176,6 +177,8 @@ pub enum OPCode {
     Id,
     // Label instructions.
     Label,
+    // Nop instruction.
+    Nop,
 }
 
 impl fmt::Display for ValueOp {
@@ -244,6 +247,8 @@ impl ValueOp {
 /// variables.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {
+    // Nop instruction are instructions that produce no values or side effects.
+    Nop,
     // Constant instructions are instructions that produce a single constant
     // typed value to a destination variable.
     Constant {
@@ -286,6 +291,7 @@ pub enum Instruction {
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Nop => write!(f, "NOP"),
             Self::Constant {
                 dst,
                 op,
@@ -375,6 +381,7 @@ impl Instruction {
                 ValueOp::And => OPCode::And,
                 ValueOp::Call => OPCode::Call,
             },
+            Self::Nop => OPCode::Nop,
             Self::Constant { .. } => OPCode::Const,
             Self::Label { .. } => OPCode::Label,
         }
@@ -394,6 +401,11 @@ impl Instruction {
             Instruction::Effect { args, .. } | Instruction::Value { args, .. } => Some(args),
             _ => None,
         }
+    }
+
+    /// Return the `Nop` instruction.
+    pub fn nop() -> Instruction {
+        Instruction::Nop
     }
 
     /// Emit a constant instruction.
