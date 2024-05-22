@@ -1,11 +1,11 @@
 //! This module implements multiple transforms on the glouton IR
 //! mostly focused on scalar optimizations.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Deref, vec};
 
 use crate::{
     cfg::Graph,
-    ir::{self, Function, Instruction},
+    ir::{self, Function, Instruction, OPCode},
 };
 
 struct FunctionRewriter {}
@@ -71,80 +71,39 @@ impl DCE {
     /// Trivial DCE pass on a function returns `true` if any instructions are
     /// eliminated.
     pub fn tdce(function: &mut ir::Function) -> bool {
-        let orig = function.instructions().len();
-        let mut elim = false;
-        println!("Starting tdce: eliminate {}", elim);
-        // Get a list of basic blocks.
-        let mut bbs = Graph::form_basic_blocks(function.instructions());
-        // List of defs which are just variable definitions in a block.
-        let mut use_defs: HashSet<String> = HashSet::new();
+        let mut worklist = function.instructions_mut_vec().clone();
+        let candidates = worklist.len();
+        let mut use_defs = HashSet::new();
 
-        // Mark all the instruction args as used.
-        for bb in &bbs {
-            for inst in bb.instructions() {
-                // Check for instruction uses, if an instruction is uses defs
-                // we remove them from the `defs` set.
-                match inst.args() {
-                    Some(args) => args.iter().for_each(|arg| {
-                        use_defs.insert(arg.clone());
-                    }),
-                    _ => (),
-                }
+        for inst in &worklist {
+            // Check for instruction uses, if an instruction is uses defs
+            // we remove them from the `defs` set.
+            match inst.args() {
+                Some(args) => args.iter().for_each(|arg| {
+                    use_defs.insert(arg.clone());
+                }),
+                _ => (),
             }
         }
 
-        for bb in &mut bbs {
-            // Number of candidate instructions for elimination is initially set
-            // to the number of instructions in the block since we will at most
-            // eliminate all instructions in the block.
-            let mut n_elim_candidates = bb.len();
-            let mut droppable = vec![];
-            // Create a local copy of the basic block we are processing.
-            for (index, inst) in bb.instructions().iter().enumerate() {
-                if inst.dst().is_some_and(|dst| !use_defs.contains(dst)) {
-                    // println!("Dropping {}", inst);
-                    droppable.push(index);
-                }
+        for inst in &mut worklist {
+            if inst.dst().is_some_and(|dst| !use_defs.contains(dst)) {
+                println!("Dropping {}", inst);
+                let _ = std::mem::replace(inst, Instruction::nop());
             }
-            println!("Block before killing dead instructions : {}", bb);
-
-            // We can't drop instructiosn iteratively with `remove` as it will
-            // invalidate the indices storred in `droppable`. So we use a trick
-            // where we swap dead instructions with `Nop` and run the `NopElim`
-            // pass. (Currently the `NopElim` pass is just a loop but ideally
-            // should be extracted to its own pass.
-            for idx in droppable {
-                // println!("Killing instruction @ {idx}");
-                bb.kill(idx);
-                // Decrement the number of elimnated candidates.
-                n_elim_candidates -= 1;
-            }
-            println!("Block after killing dead instructions : {}", bb);
         }
 
-        // "Package" back the basic blocks into the parent function.
-        //
-        // TODO: This is quite possibly the worst way to do this ideally
-        // each `instruction` should hold a reference to its `parent`
-        // basic block and a location into the parent function.
-        // But that's a bigger change so for now, re-write the function.
         let mut dced = vec![];
 
-        for bb in &bbs {
-            for inst in bb.instructions() {
-                match inst {
-                    Instruction::Nop => continue,
-                    _ => dced.push(inst.clone()),
-                }
-                dced.push(inst.clone())
+        for inst in worklist {
+            if inst.opcode() != OPCode::Nop {
+                dced.push(inst);
             }
         }
-        elim = dced.len() < orig;
 
-        println!("Finished tdce: eliminate {}", elim);
+        dced.clone_into(&mut function.body);
 
-        function.body = dced;
-        elim
+        candidates != function.instructions().len()
     }
 }
 

@@ -572,8 +572,18 @@ impl Function {
     }
 
     /// Return a non-mutable reference to the function instructions.
-    pub fn instructions(&self) -> &Vec<Instruction> {
+    pub fn instructions(&self) -> &[Instruction] {
         &self.body
+    }
+
+    /// Return a mutable reference to the function instructions.
+    pub fn instructions_mut(&mut self) -> &mut [Instruction] {
+        self.body.as_mut()
+    }
+
+    /// Return a mutable reference to the function instructions as a `Vec`.
+    pub fn instructions_mut_vec(&mut self) -> &mut Vec<Instruction> {
+        &mut self.body
     }
 
     /// Insert the instruction at the given position.
