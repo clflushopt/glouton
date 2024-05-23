@@ -5,10 +5,11 @@
 //! has three core instruction types, constant operations which produce
 //! constant values, value operations which take operands and produce values
 //! and effect based operations which take operands and produce no values.
-use std::fmt::{self, write};
+use std::fmt::{self};
 
 use crate::{
     ast::{self, Visitor},
+    cfg::BasicBlock,
     sema::{self, SymbolTable},
 };
 
@@ -594,6 +595,48 @@ impl Function {
     /// Remove the instruction at the given position.
     pub fn remove(&mut self, pos: usize) {
         let _ = self.body.remove(pos);
+    }
+
+    /// Form a list of basic blocks from the function, the ownership of
+    /// the returned `Vec` is transferred to the caller.
+    pub fn form_basic_blocks(&self) -> Vec<BasicBlock> {
+        let mut blocks = Vec::new();
+        let mut current = BasicBlock::new();
+        for inst in &self.body {
+            if inst.is_label() {
+                if !current.instructions().is_empty() {
+                    blocks.push(current)
+                }
+                match inst {
+                    Instruction::Label { .. } => {
+                        current = BasicBlock::new();
+                        current.push(&inst);
+                    }
+                    _ => unreachable!(),
+                }
+            } else {
+                current.push(&inst);
+                if inst.is_terminator() {
+                    blocks.push(current);
+                    current = BasicBlock::new();
+                }
+            }
+        }
+        blocks
+    }
+
+    /// Reassemble a list of basic blocks into the current function body
+    /// replacing its existing instructions.
+    ///
+    /// The function consumes the input blocks, leaving them empty.
+    pub fn reassemble_from_basic_blocks(&mut self, blocks: &mut [BasicBlock]) {
+        let mut instructions = Vec::with_capacity(self.body.len());
+
+        for block in blocks {
+            instructions.append(block.instructions_mut())
+        }
+
+        instructions.clone_into(&mut self.body)
     }
 }
 

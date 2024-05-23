@@ -37,7 +37,7 @@ pub struct BasicBlock {
 
 impl BasicBlock {
     /// Create a new `BasicBlock` instance.
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             id: BlockRef(0),
             instrs: Vec::new(),
@@ -83,8 +83,8 @@ impl BasicBlock {
         std::mem::replace(&mut self.instrs[index], ir::Instruction::Nop)
     }
 
-    /// Append an instruction to the basic block.
-    fn append(&mut self, inst: &ir::Instruction) {
+    /// Push an instruction to the basic block.
+    pub fn push(&mut self, inst: &ir::Instruction) {
         self.instrs.push(inst.clone())
     }
 }
@@ -208,12 +208,12 @@ impl Graph {
                 match inst {
                     ir::Instruction::Label { .. } => {
                         block = BasicBlock::new();
-                        block.append(inst);
+                        block.push(inst);
                     }
                     _ => unreachable!(),
                 }
             } else {
-                block.append(inst);
+                block.push(inst);
                 if inst.is_terminator() {
                     blocks.push(block);
                     block = BasicBlock::new();

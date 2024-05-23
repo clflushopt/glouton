@@ -50,7 +50,9 @@ impl Transform for InstCombine {}
 /// to their usage locations.
 struct ConstantFold {}
 
-impl Transform for ConstantFold {}
+impl Transform for ConstantFold {
+    fn run(&self, function: &mut ir::Function) {}
+}
 
 /// Common subexpression elimination pass replaces common subexpressions in
 /// a basic block by their previously computed values. The pass will in most
@@ -68,8 +70,8 @@ impl Transform for CSE {}
 struct DCE {}
 
 impl DCE {
-    /// Trivial DCE pass on a function returns `true` if any instructions are
-    /// eliminated.
+    /// Trivial Global DCE pass on a function returns `true` if any instructions
+    /// are eliminated.
     pub fn tdce(function: &mut ir::Function) -> bool {
         let mut worklist = function.instructions_mut_vec().clone();
         let candidates = worklist.len();
