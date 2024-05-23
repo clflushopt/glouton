@@ -1,11 +1,11 @@
 //! This module implements multiple transforms on the glouton IR
 //! mostly focused on scalar optimizations.
 
-use std::{collections::HashSet, ops::Deref, vec};
+use std::collections::HashSet;
 
 use crate::{
     cfg::Graph,
-    ir::{self, Function, Instruction, OPCode},
+    ir::{self, Instruction, OPCode},
 };
 
 struct FunctionRewriter {}
@@ -95,15 +95,15 @@ impl DCE {
             }
         }
 
-        let mut dced = vec![];
-
-        for inst in worklist {
-            if inst.opcode() != OPCode::Nop {
-                dced.push(inst);
-            }
-        }
-
-        dced.clone_into(&mut function.body);
+        // Filter the worklist keeping only non-noop instructions, the usage
+        // of `into_iter()` is necessary otherwise we end up with a container
+        // `Vec<&Instruction>` which we can't "clone" back into the function
+        // body.
+        worklist
+            .into_iter()
+            .filter(|inst| inst.opcode() != OPCode::Nop)
+            .collect::<Vec<_>>()
+            .clone_into(&mut function.body);
 
         candidates != function.instructions().len()
     }
