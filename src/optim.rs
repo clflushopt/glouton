@@ -155,14 +155,14 @@ mod tests {
                 let ident = Identity {};
                 let dce = DCE {};
 
-                for mut func in irgen.functions_mut() {
+                for func in irgen.functions_mut() {
                     println!("Pre-Pass function: {}", func);
                 }
                 for func in irgen.functions_mut() {
                     ident.run(func);
                     dce.run(func);
                 }
-                for mut func in irgen.functions_mut() {
+                for func in irgen.functions_mut() {
                     println!("Post-Pass function: {}", func);
                 }
             }

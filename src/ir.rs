@@ -546,6 +546,12 @@ pub struct BasicBlock {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BlockRef(pub usize);
 
+impl Default for BasicBlock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BasicBlock {
     /// Create a new `BasicBlock` instance.
     pub fn new() -> Self {
@@ -704,12 +710,12 @@ impl Function {
                 match inst {
                     Instruction::Label { .. } => {
                         current = BasicBlock::new();
-                        current.push(&inst);
+                        current.push(inst);
                     }
                     _ => unreachable!(),
                 }
             } else {
-                current.push(&inst);
+                current.push(inst);
                 if inst.is_terminator() {
                     blocks.push(current);
                     current = BasicBlock::new();
