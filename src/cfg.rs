@@ -1,102 +1,8 @@
 //! Implementation of a control flow graph for representing GIR programs.
-use crate::ir::{self};
+use crate::ir;
+use crate::ir::{BasicBlock, BlockRef};
 use core::fmt;
 use std::collections::HashMap;
-
-/// We follow the same approach in the AST when building the graph, it's
-/// flattened and doesn't use pointers.
-///
-/// The first handle or reference we expose is a `BlockRef` which is used
-/// to reference basic blocks (the nodes in the graph).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct BlockRef(usize);
-
-/// `BasicBlock` is the atomic unit of the graph IR and represent a node in
-/// the control flow graph. Each basic block represent a single block of
-/// instructions assumed to execute sequentially, branches, indirect jumps
-/// are edges between basic blocks.
-///
-/// Each basic block has a set of input edges and a set of output edges
-/// each edge can describe either an unconditional jump with a target label
-/// a conditional jump with two target labels, a functional call or a function
-/// return.
-///
-/// Edges hold a single instruction that describes which control flow operation
-/// is executed on that particular edge.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BasicBlock {
-    // BlockID, assigned during initialization.
-    id: BlockRef,
-    // Instructions that constitute the basic block.
-    instrs: Vec<ir::Instruction>,
-    // Set of possible entry edges.
-    entry_points: Vec<BlockRef>,
-    // Set of possible exit edges.
-    exit_points: Vec<BlockRef>,
-}
-
-impl BasicBlock {
-    /// Create a new `BasicBlock` instance.
-    pub fn new() -> Self {
-        Self {
-            id: BlockRef(0),
-            instrs: Vec::new(),
-            entry_points: Vec::new(),
-            exit_points: Vec::new(),
-        }
-    }
-
-    /// Returns the number of instructions in the block.
-    pub fn len(&self) -> usize {
-        self.instrs.len()
-    }
-
-    /// Returns a non-mutable reference to the block leader.
-    pub fn leader(&self) -> Option<&ir::Instruction> {
-        self.instrs.first()
-    }
-
-    /// Returns a non-mutable reference to the block terminator.
-    pub fn terminator(&self) -> Option<&ir::Instruction> {
-        self.instrs.last()
-    }
-
-    /// Returns a non-mutable reference to the block instructions.
-    pub fn instructions(&self) -> &Vec<ir::Instruction> {
-        &self.instrs
-    }
-
-    /// Returns a mutable reference to the block instructions.
-    pub fn instructions_mut(&mut self) -> &mut Vec<ir::Instruction> {
-        &mut self.instrs
-    }
-
-    /// Drop the instruction at the given index and return it, has the same
-    /// semantics as `Vec::remove`.
-    pub fn remove(&mut self, index: usize) -> ir::Instruction {
-        self.instrs.remove(index)
-    }
-
-    /// Kill the instruction at the given index by swapping it with a `Nop`.
-    pub fn kill(&mut self, index: usize) -> ir::Instruction {
-        assert!(index < self.instrs.len());
-        std::mem::replace(&mut self.instrs[index], ir::Instruction::Nop)
-    }
-
-    /// Push an instruction to the basic block.
-    pub fn push(&mut self, inst: &ir::Instruction) {
-        self.instrs.push(inst.clone())
-    }
-}
-
-impl fmt::Display for BasicBlock {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for inst in &self.instrs {
-            writeln!(f, "{inst}")?;
-        }
-        Ok(())
-    }
-}
 
 /// Edges in the control flow graph connect basic blocks and hold control
 /// flow instructions and a target label.
@@ -181,7 +87,7 @@ impl Graph {
         let mut blocks: Vec<BasicBlock> = Vec::new();
 
         for function in program {
-            let mut bbs = Self::form_basic_blocks(function.instructions());
+            let mut bbs = function.form_basic_blocks();
             blocks.append(&mut bbs)
         }
 
@@ -193,48 +99,18 @@ impl Graph {
         }
     }
 
-    /// Construct basic blocks from a list of instructions, the algorithm
-    /// proceeds by iterating over the list of instructions and collecting
-    /// leaders. Leaders are the first instructions in a basic block and
-    /// we assign them based on whether the previous instruction terminates.
-    pub fn form_basic_blocks(instrs: &[ir::Instruction]) -> Vec<BasicBlock> {
-        let mut blocks = Vec::new();
-        let mut block = BasicBlock::new();
-        for inst in instrs {
-            if inst.is_label() {
-                if !block.instrs.is_empty() {
-                    blocks.push(block)
-                }
-                match inst {
-                    ir::Instruction::Label { .. } => {
-                        block = BasicBlock::new();
-                        block.push(inst);
-                    }
-                    _ => unreachable!(),
-                }
-            } else {
-                block.push(inst);
-                if inst.is_terminator() {
-                    blocks.push(block);
-                    block = BasicBlock::new();
-                }
-            }
-        }
-        blocks
-    }
-
     /// Iterate over all the constructed basic blocks and assign them a label
     /// if they don't have one. Blocks that are control flow target will always
     /// have a label instruction as a leader.
     fn assign_labels_to_blocks(&mut self) {
         for (index, block) in self.blocks.iter().enumerate() {
-            if block.instrs[0].is_label() {
-                if let ir::Instruction::Label { ref name } = block.instrs[0] {
-                    self.labels.insert(name.clone(), BlockRef(index));
+            if block.leader().is_some_and(|inst| inst.is_label()) {
+                if let ir::Instruction::Label { ref name } = block.leader().unwrap() {
+                    self.labels.insert(name.clone(), ir::BlockRef(index));
                 }
             } else {
                 let label = format!("_LABEL_AUTO_{}", index);
-                self.labels.insert(label, BlockRef(index));
+                self.labels.insert(label, ir::BlockRef(index));
             }
         }
     }
@@ -329,7 +205,7 @@ mod tests {
 
                 for (name, block_ref) in &graph.labels {
                     let block = &graph.blocks[block_ref.0];
-                    for inst in &block.instrs {
+                    for inst in block.instructions() {
                         println!("{}", inst);
                     }
                 }

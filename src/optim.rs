@@ -3,10 +3,7 @@
 
 use std::collections::HashSet;
 
-use crate::{
-    cfg::Graph,
-    ir::{self, Instruction, OPCode},
-};
+use crate::ir::{self, Instruction, OPCode};
 
 struct FunctionRewriter {}
 
@@ -30,7 +27,7 @@ struct Identity {}
 impl Transform for Identity {
     fn run(&self, function: &mut ir::Function) {
         // Get a list of basic blocks.
-        let bbs = Graph::form_basic_blocks(function.instructions());
+        let bbs = function.form_basic_blocks();
 
         for bb in bbs {
             println!("{}", bb)
@@ -161,9 +158,9 @@ mod tests {
                 for mut func in irgen.functions_mut() {
                     println!("Pre-Pass function: {}", func);
                 }
-                for mut func in irgen.functions_mut() {
-                    ident.run(&mut func);
-                    dce.run(&mut func);
+                for func in irgen.functions_mut() {
+                    ident.run(func);
+                    dce.run(func);
                 }
                 for mut func in irgen.functions_mut() {
                     println!("Post-Pass function: {}", func);
