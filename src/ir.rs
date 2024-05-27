@@ -222,6 +222,52 @@ impl ValueOp {
     }
 }
 
+/// Symbol references are used as an alternative to variable names.
+pub struct SymbolRef(i32);
+
+/// Every value in the intermediate representation is either a symbol reference
+/// or a literal value.
+///
+/// Consider the `add` instruction, it is always applied to two operands which
+/// can either be a symbol reference to a variable or a literal value. Since
+/// the intermediate representation is linear and follows SSA-form everything
+/// gets assigned to a storage location before it being used.
+enum Value {
+    StorageLocation(SymbolRef),
+    ConstantLiteral(Literal),
+}
+
+
+enum Inst {
+    Const(SymbolRef /* Destination */, Literal /* Literal value assigned to the destination */),
+    Add(SymbolRef /* Destination */, Value /* LHS */, Value /* RHS */),
+}
+
+/// Why we want to above implementation ?
+///
+/// Consider the following algorithm that does constant propagations.
+///
+/// def run(f: function):
+///   bbs = f.basic_blocks()
+///   for bb in bbs:
+///     folded = fold(bb->insts())
+///     bb.rewrite_as(folded)
+///
+/// def fold(insts):
+///   foreach(inst, insts):
+///     _fold(inst)
+///
+///
+/// def _fold(inst):
+///   match inst:
+///     add(dst, lhs, rhs) => {
+///       _lhs = _resolve_folded(lhs)
+///       _rhs = _resolve_folded(rhs)
+///       inst.rewrite(add(dst, _lhs, _rhs)
+///     }
+///     
+///
+
 /// Instructions in GIR are split into three groups, each group describe a set
 /// of behaviors that the instructions implement.
 ///
@@ -1531,6 +1577,21 @@ mod tests {
                     int i = x + y;
                 }
                 return x;
+            }
+        "#,
+        &vec![]
+    );
+
+    test_ir_gen!(
+        can_expand_nested_expressions,
+        r#"
+            int main() {
+                int x = (5 * 3 + (7 / 2) - 1) * 2/7;
+                int y = ((4 - 3) * (7 + 5)) * 1/7;
+                int z = (5 - 5) * (4 + 4 - 16);
+                int v = x * y - z;
+
+                return v;
             }
         "#,
         &vec![]

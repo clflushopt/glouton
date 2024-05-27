@@ -1,7 +1,7 @@
 //! This module implements multiple transforms on the glouton IR
 //! mostly focused on scalar optimizations.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Add};
 
 use crate::ir::{self, Instruction, OPCode};
 
@@ -47,8 +47,21 @@ impl Transform for InstCombine {}
 /// to their usage locations.
 struct ConstantFold {}
 
+impl ConstantFold {}
+
 impl Transform for ConstantFold {
-    fn run(&self, function: &mut ir::Function) {}
+    fn run(&self, function: &mut ir::Function) {
+        let mut bbs = function.form_basic_blocks();
+
+        for bb in &mut bbs {
+            for inst in bb.instructions_mut() {
+                match inst.opcode() {
+                    OPCode::Add | OPCode::Sub | OPCode::Mul | OPCode::Div => {}
+                    _ => (),
+                }
+            }
+        }
+    }
 }
 
 /// Common subexpression elimination pass replaces common subexpressions in
