@@ -223,7 +223,9 @@ impl ValueOp {
 }
 
 /// Symbol references are used as an alternative to variable names.
-pub struct SymbolRef(i32);
+pub struct SymbolRef(usize);
+
+pub struct Label(usize);
 
 /// Every value in the intermediate representation is either a symbol reference
 /// or a literal value.
@@ -237,10 +239,104 @@ enum Value {
     ConstantLiteral(Literal),
 }
 
-
 enum Inst {
-    Const(SymbolRef /* Destination */, Literal /* Literal value assigned to the destination */),
-    Add(SymbolRef /* Destination */, Value /* LHS */, Value /* RHS */),
+    Const(
+        SymbolRef, /* Destination */
+        Literal,   /* Literal value assigned to the destination */
+    ),
+    Add(
+        SymbolRef, /* Destination */
+        Value,     /* LHS */
+        Value,     /* RHS */
+    ),
+    Sub(
+        SymbolRef, /* Destination */
+        Value,     /* LHS */
+        Value,     /* RHS */
+    ),
+    Mul(
+        SymbolRef, /* Destination */
+        Value,     /* LHS */
+        Value,     /* RHS */
+    ),
+    Div(
+        SymbolRef, /* Destination */
+        Value,     /* LHS */
+        Value,     /* RHS */
+    ),
+    Neg(
+        SymbolRef, /* Destination */
+        Value,     /* LHS */
+    ),
+    And(
+        SymbolRef, /* Destination */
+        Value,     /* LHS */
+        Value,     /* RHS */
+    ),
+    Or(
+        SymbolRef, /* Destination */
+        Value,     /* LHS */
+        Value,     /* RHS */
+    ),
+    Not(
+        SymbolRef, /* Destination */
+        Value,     /* LHS */
+    ),
+    Eq(
+        SymbolRef, /* Destination */
+        Value,     /* LHS */
+        Value,     /* RHS */
+    ),
+    Neq(
+        SymbolRef, /* Destination */
+        Value,     /* LHS */
+        Value,     /* RHS */
+    ),
+    Lt(
+        SymbolRef, /* Destination */
+        Value,     /* LHS */
+        Value,     /* RHS */
+    ),
+    Lte(
+        SymbolRef, /* Destination */
+        Value,     /* LHS */
+        Value,     /* RHS */
+    ),
+    Gt(
+        SymbolRef, /* Destination */
+        Value,     /* LHS */
+        Value,     /* RHS */
+    ),
+    Gte(
+        SymbolRef, /* Destination */
+        Value,     /* LHS */
+        Value,     /* RHS */
+    ),
+    Return(Value /* Return value */),
+    Call(SymbolRef /*Call Target */),
+    Jump(Label /* Offset */),
+    Branch(SymbolRef /*Condition */, Label /* Then Target Offset */,  Label/* Else Target Offset */),
+    Id(Value),
+    Nop,
+}
+
+impl Inst {
+    pub fn opcode(&self) -> OPCode {
+        match self {
+            Inst::Add(..) => OPCode::Add,
+            Inst::Const(..) => OPCode::Const,
+            Inst::Sub(..) => OPCode::Sub,
+            Inst::Mul(..) => OPCode::Mul,
+            Inst::Div(..) => OPCode::Div,
+            Inst::Eq(..) => OPCode::Eq,
+            Inst::Neq(..) => OPCode::Neq,
+            Inst::Lt(..) => OPCode::Lt,
+            Inst::Lte(..) => OPCode::Lte,
+            Inst::Gt(..) => OPCode::Gt,
+            Inst::Gte(..) => OPCode::Gte,
+            _ => todo!(),
+        }
+    }
 }
 
 /// Why we want to above implementation ?
