@@ -225,6 +225,7 @@ impl ValueOp {
 /// Symbol references are used as an alternative to variable names.
 pub struct SymbolRef(usize);
 
+/// Labels are used to designate branch targets in control flow operations.
 pub struct Label(usize);
 
 /// Every value in the intermediate representation is either a symbol reference
@@ -264,10 +265,7 @@ enum Inst {
         Value,     /* LHS */
         Value,     /* RHS */
     ),
-    Neg(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-    ),
+    Neg(SymbolRef /* Destination */, Value /* LHS */),
     And(
         SymbolRef, /* Destination */
         Value,     /* LHS */
@@ -278,10 +276,7 @@ enum Inst {
         Value,     /* LHS */
         Value,     /* RHS */
     ),
-    Not(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-    ),
+    Not(SymbolRef /* Destination */, Value /* LHS */),
     Eq(
         SymbolRef, /* Destination */
         Value,     /* LHS */
@@ -315,7 +310,11 @@ enum Inst {
     Return(Value /* Return value */),
     Call(SymbolRef /*Call Target */),
     Jump(Label /* Offset */),
-    Branch(SymbolRef /*Condition */, Label /* Then Target Offset */,  Label/* Else Target Offset */),
+    Branch(
+        SymbolRef, /*Condition */
+        Label,     /* Then Target Offset */
+        Label,     /* Else Target Offset */
+    ),
     Id(Value),
     Nop,
 }
@@ -361,7 +360,7 @@ impl Inst {
 ///       _rhs = _resolve_folded(rhs)
 ///       inst.rewrite(add(dst, _lhs, _rhs)
 ///     }
-///     
+///
 ///
 
 /// Instructions in GIR are split into three groups, each group describe a set
