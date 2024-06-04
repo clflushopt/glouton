@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod cfg;
+pub mod instruction;
 pub mod ir;
 pub mod optim;
 pub mod parser;

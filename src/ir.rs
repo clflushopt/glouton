@@ -142,45 +142,6 @@ pub enum ValueOp {
     Id,
 }
 
-/// OPCode is a type wrapper around all opcodes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum OPCode {
-    // Indirect jumps.
-    Jump,
-    // Condtional branches.
-    Branch,
-    // Function calls that don't produce values.
-    Call,
-    // Return statements.
-    Return,
-    /// `const` operation.
-    Const,
-    // Arithmetic operators.
-    Add,
-    Sub,
-    Mul,
-    Div,
-    // Comparison operators.
-    Eq,
-    Neq,
-    Lt,
-    Gt,
-    Lte,
-    Gte,
-    // Unary operators.
-    Not,
-    Neg,
-    // Boolean operators.
-    And,
-    Or,
-    // Identity operator.
-    Id,
-    // Label instructions.
-    Label,
-    // Nop instruction.
-    Nop,
-}
-
 impl fmt::Display for ValueOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -222,146 +183,44 @@ impl ValueOp {
     }
 }
 
-/// Symbol references are used as an alternative to variable names.
-pub struct SymbolRef(usize);
-
-/// Labels are used to designate branch targets in control flow operations.
-pub struct Label(usize);
-
-/// Every value in the intermediate representation is either a symbol reference
-/// or a literal value.
-///
-/// Consider the `add` instruction, it is always applied to two operands which
-/// can either be a symbol reference to a variable or a literal value. Since
-/// the intermediate representation is linear and follows SSA-form everything
-/// gets assigned to a storage location before it being used.
-enum Value {
-    StorageLocation(SymbolRef),
-    ConstantLiteral(Literal),
-}
-
-enum Inst {
-    Const(
-        SymbolRef, /* Destination */
-        Literal,   /* Literal value assigned to the destination */
-    ),
-    Add(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
-    ),
-    Sub(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
-    ),
-    Mul(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
-    ),
-    Div(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
-    ),
-    Neg(SymbolRef /* Destination */, Value /* LHS */),
-    And(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
-    ),
-    Or(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
-    ),
-    Not(SymbolRef /* Destination */, Value /* LHS */),
-    Eq(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
-    ),
-    Neq(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
-    ),
-    Lt(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
-    ),
-    Lte(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
-    ),
-    Gt(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
-    ),
-    Gte(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
-    ),
-    Return(Value /* Return value */),
-    Call(SymbolRef /*Call Target */),
-    Jump(Label /* Offset */),
-    Branch(
-        SymbolRef, /*Condition */
-        Label,     /* Then Target Offset */
-        Label,     /* Else Target Offset */
-    ),
-    Id(Value),
+/// OPCode is a type wrapper around all opcodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OPCode {
+    // Indirect jumps.
+    Jump,
+    // Condtional branches.
+    Branch,
+    // Function calls that don't produce values.
+    Call,
+    // Return statements.
+    Return,
+    /// `const` operation.
+    Const,
+    // Arithmetic operators.
+    Add,
+    Sub,
+    Mul,
+    Div,
+    // Comparison operators.
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Lte,
+    Gte,
+    // Unary operators.
+    Not,
+    Neg,
+    // Boolean operators.
+    And,
+    Or,
+    // Identity operator.
+    Id,
+    // Label instructions.
+    Label,
+    // Nop instruction.
     Nop,
 }
-
-impl Inst {
-    pub fn opcode(&self) -> OPCode {
-        match self {
-            Inst::Add(..) => OPCode::Add,
-            Inst::Const(..) => OPCode::Const,
-            Inst::Sub(..) => OPCode::Sub,
-            Inst::Mul(..) => OPCode::Mul,
-            Inst::Div(..) => OPCode::Div,
-            Inst::Eq(..) => OPCode::Eq,
-            Inst::Neq(..) => OPCode::Neq,
-            Inst::Lt(..) => OPCode::Lt,
-            Inst::Lte(..) => OPCode::Lte,
-            Inst::Gt(..) => OPCode::Gt,
-            Inst::Gte(..) => OPCode::Gte,
-            _ => todo!(),
-        }
-    }
-}
-
-/// Why we want to above implementation ?
-///
-/// Consider the following algorithm that does constant propagations.
-///
-/// def run(f: function):
-///   bbs = f.basic_blocks()
-///   for bb in bbs:
-///     folded = fold(bb->insts())
-///     bb.rewrite_as(folded)
-///
-/// def fold(insts):
-///   foreach(inst, insts):
-///     _fold(inst)
-///
-///
-/// def _fold(inst):
-///   match inst:
-///     add(dst, lhs, rhs) => {
-///       _lhs = _resolve_folded(lhs)
-///       _rhs = _resolve_folded(rhs)
-///       inst.rewrite(add(dst, _lhs, _rhs)
-///     }
-///
-///
 
 /// Instructions in GIR are split into three groups, each group describe a set
 /// of behaviors that the instructions implement.
