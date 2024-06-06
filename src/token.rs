@@ -3,8 +3,8 @@ use std::fmt;
 
 /// Language defined keywords.
 pub const KEYWORDS: &[&str] = &[
-    "int", "char", "bool", "return", "const", "void", "if", "else", "while", "for", "break",
-    "true", "false",
+    "int", "char", "bool", "return", "const", "void", "if", "else", "while",
+    "for", "break", "true", "false",
 ];
 
 /// Token represents the individual language tokens.

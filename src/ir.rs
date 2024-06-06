@@ -390,7 +390,8 @@ impl Instruction {
     /// Returns the destination of the instruction if there is one.
     pub fn dst(&self) -> Option<&String> {
         match self {
-            Instruction::Constant { dst, .. } | Instruction::Value { dst, .. } => Some(dst),
+            Instruction::Constant { dst, .. }
+            | Instruction::Value { dst, .. } => Some(dst),
             _ => None,
         }
     }
@@ -398,7 +399,8 @@ impl Instruction {
     /// Returns the arguments of an instruction if there are any.
     pub fn args(&self) -> Option<&Vec<String>> {
         match self {
-            Instruction::Effect { args, .. } | Instruction::Value { args, .. } => Some(args),
+            Instruction::Effect { args, .. }
+            | Instruction::Value { args, .. } => Some(args),
             _ => None,
         }
     }
@@ -427,7 +429,11 @@ impl Instruction {
     }
 
     /// Emit a branch instruction.
-    fn branch(cond: String, then_target: String, else_target: String) -> Instruction {
+    fn branch(
+        cond: String,
+        then_target: String,
+        else_target: String,
+    ) -> Instruction {
         Instruction::Effect {
             args: vec![cond, then_target, else_target],
             op: EffectOp::Branch,
@@ -448,7 +454,12 @@ impl Instruction {
     }
 
     /// Emit an arithmetic operation.
-    fn arith(dst: String, op_type: Type, op: ValueOp, args: Vec<String>) -> Instruction {
+    fn arith(
+        dst: String,
+        op_type: Type,
+        op: ValueOp,
+        args: Vec<String>,
+    ) -> Instruction {
         Instruction::Value {
             args,
             dst,
@@ -458,7 +469,12 @@ impl Instruction {
     }
 
     /// Emit a comparison operation.
-    fn cmp(dst: String, op_type: Type, op: ValueOp, args: Vec<String>) -> Instruction {
+    fn cmp(
+        dst: String,
+        op_type: Type,
+        op: ValueOp,
+        args: Vec<String>,
+    ) -> Instruction {
         Instruction::Value {
             args,
             dst,
@@ -478,7 +494,12 @@ impl Instruction {
     }
 
     /// Emit a call operation.
-    fn call(dst: String, op_type: Type, name: String, mut args: Vec<String>) -> Instruction {
+    fn call(
+        dst: String,
+        op_type: Type,
+        name: String,
+        mut args: Vec<String>,
+    ) -> Instruction {
         // Name is the first argument.
         let mut func_args = vec![name];
         func_args.append(&mut args);
@@ -829,7 +850,8 @@ impl<'a> IRBuilder<'a> {
                 // The only instruction allowed in the global scope is
                 // the constant instruction.
                 assert!(
-                    inst.opcode() == OPCode::Const || inst.opcode() == OPCode::Id,
+                    inst.opcode() == OPCode::Const
+                        || inst.opcode() == OPCode::Id,
                     "found {:?} ",
                     inst.opcode()
                 );
@@ -860,7 +882,10 @@ impl<'a> IRBuilder<'a> {
 }
 
 impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
-    fn visit_decl(&mut self, decl: &ast::Decl) -> (Option<String>, Vec<Instruction>) {
+    fn visit_decl(
+        &mut self,
+        decl: &ast::Decl,
+    ) -> (Option<String>, Vec<Instruction>) {
         match decl {
             // Function declarations are the only place where we need to switch
             // scopes explicitely, since the scope only affects where variable
@@ -884,7 +909,11 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     })
                     .collect::<Vec<_>>();
                 let func_return_type = Type::from(return_type);
-                let func = Function::new(name.to_string(), func_args, func_return_type);
+                let func = Function::new(
+                    name.to_string(),
+                    func_args,
+                    func_return_type,
+                );
                 // Enter a new scope and push the new function frame.
                 self.enter(func);
                 // Generate IR for the body.
@@ -905,23 +934,31 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 value,
             } => {
                 let dst = name.clone();
-                let (arg, mut code) = if let Some(expr) = self.ast.get_expr(*value) {
-                    self.visit_expr(expr)
-                } else {
-                    unreachable!("Expected right handside to be a valid expression")
-                };
+                let (arg, mut code) =
+                    if let Some(expr) = self.ast.get_expr(*value) {
+                        self.visit_expr(expr)
+                    } else {
+                        unreachable!(
+                            "Expected right handside to be a valid expression"
+                        )
+                    };
                 // Get the destination of the right hand side.
                 code.push(Instruction::id(
                     dst.clone(),
                     Type::from(decl_type),
-                    vec![arg.expect("Expected right handside to be in a temporary variable")],
+                    vec![arg.expect(
+                        "Expected right handside to be in a temporary variable",
+                    )],
                 ));
                 (Some(dst), code)
             }
         }
     }
 
-    fn visit_stmt(&mut self, stmt: &ast::Stmt) -> (Option<String>, Vec<Instruction>) {
+    fn visit_stmt(
+        &mut self,
+        stmt: &ast::Stmt,
+    ) -> (Option<String>, Vec<Instruction>) {
         match stmt {
             // Variable declaration are
             ast::Stmt::LocalVar {
@@ -930,16 +967,21 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 value,
             } => {
                 let dst = name.clone();
-                let (arg, mut code) = if let Some(expr) = self.ast.get_expr(*value) {
-                    self.visit_expr(expr)
-                } else {
-                    unreachable!("Expected right handside to be a valid expression")
-                };
+                let (arg, mut code) =
+                    if let Some(expr) = self.ast.get_expr(*value) {
+                        self.visit_expr(expr)
+                    } else {
+                        unreachable!(
+                            "Expected right handside to be a valid expression"
+                        )
+                    };
                 // Get the destination of the right hand side.
                 code.push(Instruction::id(
                     dst.clone(),
                     Type::from(decl_type),
-                    vec![arg.expect("Expected right handside to be in a temporary variable")],
+                    vec![arg.expect(
+                        "Expected right handside to be in a temporary variable",
+                    )],
                 ));
                 (Some(dst), code)
             }
@@ -948,10 +990,14 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 self.level += 1;
                 let mut code = vec![];
                 for stmt_ref in stmts {
-                    let (_, mut block) = if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
+                    let (_, mut block) = if let Some(stmt) =
+                        self.ast.get_stmt(*stmt_ref)
+                    {
                         self.visit_stmt(stmt)
                     } else {
-                        unreachable!("Expected right handside to be a valid expression")
+                        unreachable!(
+                            "Expected right handside to be a valid expression"
+                        )
                     };
 
                     code.append(&mut block);
@@ -961,26 +1007,31 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
             }
             // Return statements.
             ast::Stmt::Return(expr_ref) => {
-                let (name, mut code) = if let Some(expr) = self.ast.get_expr(*expr_ref) {
-                    self.visit_expr(expr)
-                } else {
-                    unreachable!("Expected right handside to be a valid expression")
-                };
+                let (name, mut code) =
+                    if let Some(expr) = self.ast.get_expr(*expr_ref) {
+                        self.visit_expr(expr)
+                    } else {
+                        unreachable!(
+                            "Expected right handside to be a valid expression"
+                        )
+                    };
 
-                let ret = Instruction::ret(
-                    name.clone()
-                        .expect("Expected right handside to be temporary or named"),
-                );
+                let ret = Instruction::ret(name.clone().expect(
+                    "Expected right handside to be temporary or named",
+                ));
                 code.push(ret);
                 (name, code)
             }
             // Expression statements.
             ast::Stmt::Expr(expr_ref) => {
-                let (name, code) = if let Some(expr) = self.ast.get_expr(*expr_ref) {
-                    self.visit_expr(expr)
-                } else {
-                    unreachable!("Expected right handside to be a valid expression")
-                };
+                let (name, code) =
+                    if let Some(expr) = self.ast.get_expr(*expr_ref) {
+                        self.visit_expr(expr)
+                    } else {
+                        unreachable!(
+                            "Expected right handside to be a valid expression"
+                        )
+                    };
                 (name, code)
             }
             // Conditional blocks.
@@ -989,10 +1040,14 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 then_block,
                 else_block,
             } => {
-                let (condition, mut code) = if let Some(cond) = self.ast.get_expr(*condition) {
+                let (condition, mut code) = if let Some(cond) =
+                    self.ast.get_expr(*condition)
+                {
                     self.visit_expr(cond)
                 } else {
-                    unreachable!("Expected condition to reference a valid expression")
+                    unreachable!(
+                        "Expected condition to reference a valid expression"
+                    )
                 };
                 let then_label = self.next_label();
                 let else_label = self.next_label();
@@ -1009,10 +1064,14 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 let inst = Instruction::label(then_label);
                 code.push(inst);
                 // Generate instruction for the then block.
-                let (_, mut block) = if let Some(block) = self.ast.get_stmt(*then_block) {
+                let (_, mut block) = if let Some(block) =
+                    self.ast.get_stmt(*then_block)
+                {
                     self.visit_stmt(block)
                 } else {
-                    unreachable!("Expected reference to block to be a valid statement")
+                    unreachable!(
+                        "Expected reference to block to be a valid statement"
+                    )
                 };
                 code.append(&mut block);
                 // Push a jump instruction to the end label iif the last
@@ -1029,10 +1088,9 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 code.push(inst);
                 // Generate instruction for the else block if one exists.
                 if else_block.is_some() {
-                    let (_, mut block) = if let Some(block) = self
-                        .ast
-                        .get_stmt(else_block.expect("Expected else block to be `Some`"))
-                    {
+                    let (_, mut block) = if let Some(block) = self.ast.get_stmt(
+                        else_block.expect("Expected else block to be `Some`"),
+                    ) {
                         self.visit_stmt(block)
                     } else {
                         unreachable!("Expected reference to block to be a valid statement")
@@ -1058,7 +1116,9 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 decl_type: _,
                 name: _,
             } => {
-                unreachable!("Expected function argument to be handled in `visit_decl`")
+                unreachable!(
+                    "Expected function argument to be handled in `visit_decl`"
+                )
             }
             ast::Stmt::For {
                 init,
@@ -1072,10 +1132,9 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 let mut code = Vec::new();
                 // Generate initializer block if it exists.
                 if init.is_some() {
-                    let (_, mut block) = if let Some(block) = self
-                        .ast
-                        .get_expr(init.expect("Expected init block to be `Some`"))
-                    {
+                    let (_, mut block) = if let Some(block) = self.ast.get_expr(
+                        init.expect("Expected init block to be `Some`"),
+                    ) {
                         self.visit_expr(block)
                     } else {
                         unreachable!("Expected reference to initializer to be a valid expression")
@@ -1086,18 +1145,22 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 let inst = Instruction::label(loop_body_label.clone());
                 code.push(inst);
                 // Generate the loop body block.
-                let (_, mut block) = if let Some(block) = self.ast.get_stmt(*body) {
+                let (_, mut block) = if let Some(block) =
+                    self.ast.get_stmt(*body)
+                {
                     self.visit_stmt(block)
                 } else {
-                    unreachable!("Expected reference to body to be a valid statement")
+                    unreachable!(
+                        "Expected reference to body to be a valid statement"
+                    )
                 };
                 code.append(&mut block);
                 // Generate the iteration expression.
                 if iteration.is_some() {
-                    let (_, mut block) = if let Some(block) = self
-                        .ast
-                        .get_expr(iteration.expect("Expected iteration expression to be `Some`"))
-                    {
+                    let (_, mut block) = if let Some(block) =
+                        self.ast.get_expr(iteration.expect(
+                            "Expected iteration expression to be `Some`",
+                        )) {
                         self.visit_expr(block)
                     } else {
                         unreachable!("Expected reference to iteration to be a valid expression")
@@ -1106,10 +1169,12 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 }
                 // Generate the condition block if it exists.
                 if condition.is_some() {
-                    let (condition, mut block) = if let Some(block) = self
-                        .ast
-                        .get_expr(condition.expect("Expected condition block to be `Some`"))
-                    {
+                    let (condition, mut block) = if let Some(block) =
+                        self.ast.get_expr(
+                            condition.expect(
+                                "Expected condition block to be `Some`",
+                            ),
+                        ) {
                         self.visit_expr(block)
                     } else {
                         unreachable!("Expected reference to initializer to be a valid expression")
@@ -1117,7 +1182,8 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     code.append(&mut block);
                     // Generate branch to exit code.
                     let inst = Instruction::branch(
-                        condition.expect("Expected condition variable to be valid"),
+                        condition
+                            .expect("Expected condition variable to be valid"),
                         loop_body_label.clone(),
                         loop_exit_label.clone(),
                     );
@@ -1138,10 +1204,9 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     let inst = Instruction::label(loop_body_label.clone());
                     code.push(inst);
                     // Generate the loop body block.
-                    let (_, mut block) = if let Some(block) = self
-                        .ast
-                        .get_stmt(body.expect("Expected loop body to be `Some`"))
-                    {
+                    let (_, mut block) = if let Some(block) = self.ast.get_stmt(
+                        body.expect("Expected loop body to be `Some`"),
+                    ) {
                         self.visit_stmt(block)
                     } else {
                         unreachable!("Expected reference to body to be a valid statement")
@@ -1149,10 +1214,12 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     code.append(&mut block);
                 }
                 if condition.is_some() {
-                    let (condition, mut block) = if let Some(block) = self
-                        .ast
-                        .get_expr(condition.expect("Expected condition block to be `Some`"))
-                    {
+                    let (condition, mut block) = if let Some(block) =
+                        self.ast.get_expr(
+                            condition.expect(
+                                "Expected condition block to be `Some`",
+                            ),
+                        ) {
                         self.visit_expr(block)
                     } else {
                         unreachable!("Expected reference to initializer to be a valid expression")
@@ -1160,7 +1227,8 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     code.append(&mut block);
                     // Generate branch to exit code.
                     let inst = Instruction::branch(
-                        condition.expect("Expected condition variable to be valid"),
+                        condition
+                            .expect("Expected condition variable to be valid"),
                         loop_body_label.clone(),
                         loop_exit_label.clone(),
                     );
@@ -1175,7 +1243,10 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
         }
     }
 
-    fn visit_expr(&mut self, expr: &ast::Expr) -> (Option<String>, Vec<Instruction>) {
+    fn visit_expr(
+        &mut self,
+        expr: &ast::Expr,
+    ) -> (Option<String>, Vec<Instruction>) {
         match *expr {
             ast::Expr::IntLiteral(value) => {
                 let mut code = vec![];
@@ -1211,11 +1282,14 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 // TODO: Visitor for IR will return a lhs assignee and an instruction
                 // for the rhs assignment.
                 // let src = self.visit_expr(self.ast.get_expr(operand).unwrap());
-                let (name, mut code) = if let Some(expr) = self.ast.get_expr(operand) {
-                    self.visit_expr(expr)
-                } else {
-                    unreachable!("Expected right handside to be a valid expression")
-                };
+                let (name, mut code) =
+                    if let Some(expr) = self.ast.get_expr(operand) {
+                        self.visit_expr(expr)
+                    } else {
+                        unreachable!(
+                            "Expected right handside to be a valid expression"
+                        )
+                    };
 
                 let dst = self.next_var();
                 let inst = match operator {
@@ -1224,7 +1298,9 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                         Type::Int,
                         ValueOp::Neg,
                         vec![name
-                            .expect("Expected right handside to be in a temporary")
+                            .expect(
+                                "Expected right handside to be in a temporary",
+                            )
                             .clone()],
                     ),
                     ast::UnaryOperator::Not => Instruction::arith(
@@ -1232,7 +1308,9 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                         Type::Bool,
                         ValueOp::Not,
                         vec![name
-                            .expect("Expected right handside to be in a temporary")
+                            .expect(
+                                "Expected right handside to be in a temporary",
+                            )
                             .clone()],
                     ),
                 };
@@ -1245,18 +1323,24 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 right,
             } => {
                 let mut code = vec![];
-                let (lhs, mut code_left) = if let Some(expr) = self.ast.get_expr(left) {
-                    self.visit_expr(expr)
-                } else {
-                    unreachable!("Expected right handside to be a valid expression")
-                };
+                let (lhs, mut code_left) =
+                    if let Some(expr) = self.ast.get_expr(left) {
+                        self.visit_expr(expr)
+                    } else {
+                        unreachable!(
+                            "Expected right handside to be a valid expression"
+                        )
+                    };
                 code.append(&mut code_left);
 
-                let (rhs, mut code_right) = if let Some(expr) = self.ast.get_expr(right) {
-                    self.visit_expr(expr)
-                } else {
-                    unreachable!("Expected right handside to be a valid expression")
-                };
+                let (rhs, mut code_right) =
+                    if let Some(expr) = self.ast.get_expr(right) {
+                        self.visit_expr(expr)
+                    } else {
+                        unreachable!(
+                            "Expected right handside to be a valid expression"
+                        )
+                    };
                 code.append(&mut code_right);
 
                 let dst = self.next_var();
@@ -1269,10 +1353,14 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                         Type::Int,
                         ValueOp::from(&operator),
                         vec![
-                            lhs.expect("Expected right handside to be in a temporary")
-                                .clone(),
-                            rhs.expect("Expected right handside to be in a temporary")
-                                .clone(),
+                            lhs.expect(
+                                "Expected right handside to be in a temporary",
+                            )
+                            .clone(),
+                            rhs.expect(
+                                "Expected right handside to be in a temporary",
+                            )
+                            .clone(),
                         ],
                     ),
                     ast::BinaryOperator::Eq
@@ -1285,10 +1373,14 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                         Type::Bool,
                         ValueOp::from(&operator),
                         vec![
-                            lhs.expect("Expected right handside to be in a temporary")
-                                .clone(),
-                            rhs.expect("Expected right handside to be in a temporary")
-                                .clone(),
+                            lhs.expect(
+                                "Expected right handside to be in a temporary",
+                            )
+                            .clone(),
+                            rhs.expect(
+                                "Expected right handside to be in a temporary",
+                            )
+                            .clone(),
                         ],
                     ),
                 };
@@ -1299,25 +1391,33 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
             ast::Expr::Named(ref name) => {
                 let _t = match self.symbol_table.find(name, self.level) {
                     Some(symbol) => symbol.t(),
-                    None => unreachable!("Expected a symbol for named expression : `{name}`"),
+                    None => unreachable!(
+                        "Expected a symbol for named expression : `{name}`"
+                    ),
                 };
                 (Some(name.clone()), vec![])
             }
             ast::Expr::Grouping(expr_ref) => {
-                let (name, code) = if let Some(expr) = self.ast.get_expr(expr_ref) {
-                    self.visit_expr(expr)
-                } else {
-                    unreachable!("Expected right handside to be a valid expression")
-                };
+                let (name, code) =
+                    if let Some(expr) = self.ast.get_expr(expr_ref) {
+                        self.visit_expr(expr)
+                    } else {
+                        unreachable!(
+                            "Expected right handside to be a valid expression"
+                        )
+                    };
                 (name, code)
             }
             ast::Expr::Assignment { name, value } => {
                 let mut code = vec![];
-                let (rhs, mut code_right) = if let Some(expr) = self.ast.get_expr(value) {
-                    self.visit_expr(expr)
-                } else {
-                    unreachable!("Expected right handside to be a valid expression")
-                };
+                let (rhs, mut code_right) =
+                    if let Some(expr) = self.ast.get_expr(value) {
+                        self.visit_expr(expr)
+                    } else {
+                        unreachable!(
+                            "Expected right handside to be a valid expression"
+                        )
+                    };
                 code.append(&mut code_right);
                 // We know that by definition assignment left handside will
                 // always be a named expression, unless we are dealing with
@@ -1325,9 +1425,14 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 let (lhs, _) = if let Some(named) = self.ast.get_expr(name) {
                     self.visit_expr(named)
                 } else {
-                    unreachable!("Expected right handside to be a valid expression")
+                    unreachable!(
+                        "Expected right handside to be a valid expression"
+                    )
                 };
-                let t = match self.symbol_table.find(&lhs.clone().unwrap(), self.level) {
+                let t = match self
+                    .symbol_table
+                    .find(&lhs.clone().unwrap(), self.level)
+                {
                     Some(symbol) => symbol.t(),
                     None => unreachable!(
                         "Expected a symbol for named expression : `{}`",
@@ -1348,7 +1453,9 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 };
                 let t = match self.symbol_table.find(name, self.level) {
                     Some(symbol) => symbol.t(),
-                    None => unreachable!("Expected a symbol for named expression : `{name}`"),
+                    None => unreachable!(
+                        "Expected a symbol for named expression : `{name}`"
+                    ),
                 };
                 let (vars, code): (Vec<String>, Vec<Vec<Instruction>>) = args
                     .iter()
@@ -1357,13 +1464,21 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                             let (arg, code) = self.visit_expr(expr);
                             (arg.unwrap(), code)
                         } else {
-                            unreachable!("Expected argument to be a valid expression")
+                            unreachable!(
+                                "Expected argument to be a valid expression"
+                            )
                         }
                     })
                     .unzip();
-                let mut code: Vec<Instruction> = code.into_iter().flatten().collect();
+                let mut code: Vec<Instruction> =
+                    code.into_iter().flatten().collect();
                 let dst = self.next_var();
-                let inst = Instruction::call(dst.clone(), Type::from(&t), name.to_string(), vars);
+                let inst = Instruction::call(
+                    dst.clone(),
+                    Type::from(&t),
+                    name.to_string(),
+                    vars,
+                );
                 code.push(inst);
                 (Some(dst), code)
             }

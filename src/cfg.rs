@@ -105,7 +105,9 @@ impl Graph {
     fn assign_labels_to_blocks(&mut self) {
         for (index, block) in self.blocks.iter().enumerate() {
             if block.leader().is_some_and(|inst| inst.is_label()) {
-                if let ir::Instruction::Label { ref name } = block.leader().unwrap() {
+                if let ir::Instruction::Label { ref name } =
+                    block.leader().unwrap()
+                {
                     self.labels.insert(name.clone(), ir::BlockRef(index));
                 }
             } else {
@@ -148,7 +150,10 @@ impl Graph {
                                 if v == BlockRef(block_ref.0 + 1) {
                                     k.clone()
                                 } else {
-                                    unreachable!("No label found for block {}", block_ref.0 + 1)
+                                    unreachable!(
+                                        "No label found for block {}",
+                                        block_ref.0 + 1
+                                    )
                                 }
                             })
                             .next()

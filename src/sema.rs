@@ -48,9 +48,15 @@ impl fmt::Display for Symbol {
             Self::LocalVariable { name, t, position } => {
                 write!(f, "LOCAL({}): {} @ {position}", name, t)
             }
-            Self::GlobalVariable { name, t } => write!(f, "GLOBAL({}): {}", name, t),
-            Self::FunctionArgument { name, t } => write!(f, "ARG({}): {}", name, t),
-            Self::FunctionDefinition { name, t, .. } => write!(f, "FUNCTION({}): {}", name, t),
+            Self::GlobalVariable { name, t } => {
+                write!(f, "GLOBAL({}): {}", name, t)
+            }
+            Self::FunctionArgument { name, t } => {
+                write!(f, "ARG({}): {}", name, t)
+            }
+            Self::FunctionDefinition { name, t, .. } => {
+                write!(f, "FUNCTION({}): {}", name, t)
+            }
         }
     }
 }
@@ -257,7 +263,9 @@ impl<'a> DeclAnalyzer<'a> {
                         name: name.clone(),
                         t: *decl_type,
                     },
-                    Scope::Global => unreachable!("Function arguments must be in a local scope"),
+                    Scope::Global => unreachable!(
+                        "Function arguments must be in a local scope"
+                    ),
                 };
                 self.table.bind(name, symbol)
             }
@@ -345,18 +353,23 @@ impl<'a> ast::Visitor<()> for DeclAnalyzer<'a> {
                     match func_body {
                         Stmt::Block(body) => {
                             for stmt_ref in body {
-                                if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
+                                if let Some(stmt) = self.ast.get_stmt(*stmt_ref)
+                                {
                                     self.visit_stmt(stmt)
                                 }
                             }
                         }
-                        _ => unreachable!("function body must be a block statement"),
+                        _ => unreachable!(
+                            "function body must be a block statement"
+                        ),
                     }
                 }
                 // Exit the function scope.
                 self.table.exit();
             }
-            global_var @ Decl::GlobalVar { .. } => self.define_global_binding(global_var),
+            global_var @ Decl::GlobalVar { .. } => {
+                self.define_global_binding(global_var)
+            }
         }
     }
     fn visit_expr(&mut self, _: &Expr) {}
@@ -629,7 +642,9 @@ impl<'a> SemanticAnalyzer<'a> {
 
 impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
     fn visit_expr(&mut self, _: &Expr) {
-        unreachable!("Semantic analysis pass is handled by internal `resolve` function.")
+        unreachable!(
+            "Semantic analysis pass is handled by internal `resolve` function."
+        )
     }
 
     fn visit_stmt(&mut self, stmt: &Stmt) {
@@ -643,21 +658,30 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                     let rvalue_t = self.resolve(assignee);
                     assert_eq!(decl_type, &rvalue_t, "Invalid assignment of expression with type {rvalue_t} to l-value {name} with type {decl_type}")
                 } else {
-                    unreachable!("Expression at ref {} was not found.", value.get())
+                    unreachable!(
+                        "Expression at ref {} was not found.",
+                        value.get()
+                    )
                 }
             }
             ast::Stmt::Expr(expr_ref) => {
                 if let Some(assignee) = self.ast.get_expr(*expr_ref) {
                     let _ = self.resolve(assignee);
                 } else {
-                    unreachable!("Expression at ref {} was not found.", expr_ref.get())
+                    unreachable!(
+                        "Expression at ref {} was not found.",
+                        expr_ref.get()
+                    )
                 }
             }
             ast::Stmt::Return(expr_ref) => {
                 if let Some(assignee) = self.ast.get_expr(*expr_ref) {
                     let _ = self.resolve(assignee);
                 } else {
-                    unreachable!("Expression at ref {} was not found.", expr_ref.get())
+                    unreachable!(
+                        "Expression at ref {} was not found.",
+                        expr_ref.get()
+                    )
                 }
             }
             ast::Stmt::Block(stmts) => {
@@ -666,7 +690,10 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                     if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
                         self.visit_stmt(stmt)
                     } else {
-                        unreachable!("Expression at ref {} was not found.", stmt_ref.get())
+                        unreachable!(
+                            "Expression at ref {} was not found.",
+                            stmt_ref.get()
+                        )
                     }
                 }
                 self.exit_scope();
@@ -683,7 +710,10 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                     if let Some(init) = self.ast.get_expr(*init_ref) {
                         let _ = self.resolve(init);
                     } else {
-                        unreachable!("Expression at ref {} was not found.", init_ref.get())
+                        unreachable!(
+                            "Expression at ref {} was not found.",
+                            init_ref.get()
+                        )
                     }
                     match self.ast.get_expr(*init_ref) {
                         Some(ast::Expr::Named(_)) | Some(ast::Expr::Assignment { .. }) => (),
@@ -702,7 +732,10 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                             condition
                         )
                     } else {
-                        unreachable!("Expression at ref {} was not found.", condition_ref.get())
+                        unreachable!(
+                            "Expression at ref {} was not found.",
+                            condition_ref.get()
+                        )
                     }
                 }
                 // Validate iteration expression of the `for` loop is an
@@ -720,7 +753,9 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                 if let Some(block) = self.ast.get_stmt(*body) {
                     self.visit_stmt(block)
                 } else {
-                    unreachable!("Expected `for` loop body to be `Block` statement.")
+                    unreachable!(
+                        "Expected `for` loop body to be `Block` statement."
+                    )
                 }
             }
             ast::Stmt::If {
@@ -737,7 +772,10 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                         "invalid expression type in `if` statement, must be of type bool found {t}"
                     );
                 } else {
-                    unreachable!("Expression at ref {} was not found.", condition.get())
+                    unreachable!(
+                        "Expression at ref {} was not found.",
+                        condition.get()
+                    )
                 }
                 if let Some(block) = self.ast.get_stmt(*then_block) {
                     self.visit_stmt(block)
@@ -761,17 +799,21 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                             condition
                         )
                     } else {
-                        unreachable!("Expression at ref {} was not found.", condition_ref.get())
+                        unreachable!(
+                            "Expression at ref {} was not found.",
+                            condition_ref.get()
+                        )
                     }
                 }
                 // Recurisvely validate the statements in the block.
-                if let Some(block) = self
-                    .ast
-                    .get_stmt(body.expect("Expected body to be a valid statement"))
-                {
+                if let Some(block) = self.ast.get_stmt(
+                    body.expect("Expected body to be a valid statement"),
+                ) {
                     self.visit_stmt(block)
                 } else {
-                    unreachable!("Expected `for` loop body to be `Block` statement.")
+                    unreachable!(
+                        "Expected `for` loop body to be `Block` statement."
+                    )
                 }
             }
             _ => todo!("Unimplemented visitor for stmt of kind {:?}", stmt),
@@ -788,7 +830,10 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                     let rvalue_t = self.resolve(assignee);
                     assert_eq!(decl_type, &rvalue_t)
                 } else {
-                    unreachable!("Expression at ref {} was not found.", value.get())
+                    unreachable!(
+                        "Expression at ref {} was not found.",
+                        value.get()
+                    )
                 }
             }
             ast::Decl::Function {
@@ -805,7 +850,9 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                             match self.ast.get_stmt(*stmt_ref) {
                                 Some(ast::Stmt::Return(ret_expr)) => {
                                     has_return_stmt = true;
-                                    if let Some(expr) = self.ast.get_expr(*ret_expr) {
+                                    if let Some(expr) =
+                                        self.ast.get_expr(*ret_expr)
+                                    {
                                         let ret_expr_t = self.resolve(expr);
                                         assert_eq!(ret_expr_t, *return_type, "Invalid return statement with expression of type {ret_expr_t}, function is of type {return_type}")
                                     }
@@ -818,7 +865,9 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
                             }
                         }
                     }
-                    _ => unreachable!("Expected function body to be a `Block` statement."),
+                    _ => unreachable!(
+                        "Expected function body to be a `Block` statement."
+                    ),
                 }
                 if !has_return_stmt {
                     // panic!("Function {name} with type {return_type} has no `return` statement.")
@@ -887,7 +936,8 @@ mod tests {
 
                 let mut decl_analyzer = DeclAnalyzer::new(parser.ast());
                 let symbol_table = decl_analyzer.analyze();
-                let mut semantic_analyzer = SemanticAnalyzer::new(parser.ast(), symbol_table);
+                let mut semantic_analyzer =
+                    SemanticAnalyzer::new(parser.ast(), symbol_table);
                 println!("AST: {}", parser.ast());
                 for (ii, table) in symbol_table.tables.iter().enumerate() {
                     println!("Scope @ {}", ii);

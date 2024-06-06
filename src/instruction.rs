@@ -15,6 +15,17 @@ pub enum Type {
     Char,
 }
 
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unit => write!(f, ""),
+            Self::Int => write!(f, "int"),
+            Self::Bool => write!(f, "bool"),
+            Self::Char => write!(f, "char"),
+        }
+    }
+}
+
 /// Literal values.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Literal {
@@ -42,16 +53,34 @@ impl fmt::Display for Literal {
 /// Symbol references are used as an alternative to variable names.
 pub struct SymbolRef(usize /* Reference */, Type);
 
+/// Symbols can represent variable or function names.
+type Symbol = (String, Type);
+
 /// Labels are used to designate branch targets in control flow operations.
 ///
 /// Each label is a relative offset to the target branch first instruction.
 pub struct Label(usize);
 
+impl fmt::Display for Label {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "__LABEL_{}", self.0)
+    }
+}
+
 /// Every value in the intermediate representation is either a symbol reference
 /// to a storage location or a literal value.
 enum Value {
-    StorageLocation(SymbolRef),
+    StorageLocation(Symbol),
     ConstantLiteral(Literal),
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::StorageLocation(symbol) => write!(f, "{}", symbol.0),
+            Self::ConstantLiteral(lit) => write!(f, "{lit}"),
+        }
+    }
 }
 
 /// OPCode is a type wrapper around all opcodes.
@@ -96,89 +125,92 @@ pub enum OPCode {
 enum Instruction {
     // `const` operation.
     Const(
-        SymbolRef, /* Destination */
-        Literal,   /* Literal value assigned to the destination */
+        Symbol,  /* Destination */
+        Literal, /* Literal value assigned to the destination */
     ),
     // Arithmetic operators.
     Add(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
+        Symbol, /* Destination */
+        Value,  /* LHS */
+        Value,  /* RHS */
     ),
     Sub(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
+        Symbol, /* Destination */
+        Value,  /* LHS */
+        Value,  /* RHS */
     ),
     Mul(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
+        Symbol, /* Destination */
+        Value,  /* LHS */
+        Value,  /* RHS */
     ),
     Div(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
+        Symbol, /* Destination */
+        Value,  /* LHS */
+        Value,  /* RHS */
     ),
     // Binary boolean operators.
     And(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
+        Symbol, /* Destination */
+        Value,  /* LHS */
+        Value,  /* RHS */
     ),
     Or(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
+        Symbol, /* Destination */
+        Value,  /* LHS */
+        Value,  /* RHS */
     ),
     // Unary operators.
-    Not(SymbolRef /* Destination */, Value /* LHS */),
-    Neg(SymbolRef /* Destination */, Value /* LHS */),
+    Not(Symbol /* Destination */, Value /* LHS */),
+    Neg(Symbol /* Destination */, Value /* LHS */),
     // Comparison operators.
     Eq(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
+        Symbol, /* Destination */
+        Value,  /* LHS */
+        Value,  /* RHS */
     ),
     Neq(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
+        Symbol, /* Destination */
+        Value,  /* LHS */
+        Value,  /* RHS */
     ),
     Lt(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
+        Symbol, /* Destination */
+        Value,  /* LHS */
+        Value,  /* RHS */
     ),
     Lte(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
+        Symbol, /* Destination */
+        Value,  /* LHS */
+        Value,  /* RHS */
     ),
     Gt(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
+        Symbol, /* Destination */
+        Value,  /* LHS */
+        Value,  /* RHS */
     ),
     Gte(
-        SymbolRef, /* Destination */
-        Value,     /* LHS */
-        Value,     /* RHS */
+        Symbol, /* Destination */
+        Value,  /* LHS */
+        Value,  /* RHS */
     ),
     // Return statements.
     Return(Value /* Return value */),
     // Function calls.
-    Call(SymbolRef /* Call Target */),
+    Call(
+        Symbol,     /* Call Target */
+        Vec<Value>, /* Arguments */
+    ),
     // Direct jump to label.
     Jump(Label /* Offset */),
     // Condtional branches.
     Branch(
-        SymbolRef, /* Condition */
-        Label,     /* Then Target Offset */
-        Label,     /* Else Target Offset */
+        Symbol, /* Condition */
+        Label,  /* Then Target Offset */
+        Label,  /* Else Target Offset */
     ),
     // Identity operator.
-    Id(SymbolRef /* Destination symbol*/, Value),
+    Id(Symbol /* Destination symbol*/, Value),
     // Label pseudo instruction, acts as a data marker when generating code.
     Label(usize /* Label handle or offset */),
     // Nop instruction.
@@ -209,7 +241,7 @@ impl Instruction {
             Instruction::Branch(..) => OPCode::Branch,
             Instruction::Id(..) => OPCode::Id,
             Instruction::Nop => OPCode::Nop,
-            Instruction::Label => OPCode::Label,
+            Instruction::Label(..) => OPCode::Label,
         }
     }
 }
@@ -217,26 +249,66 @@ impl Instruction {
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Instruction::Const(..) => write!(f, "const"),
-            Instruction::Add(..) => write!(f, "add"),
-            Instruction::Sub(..) => write!(f, "sub"),
-            Instruction::Mul(..) => write!(f, "mul"),
-            Instruction::Div(..) => write!(f, "div"),
-            Instruction::And(..) => write!(f, "and"),
-            Instruction::Or(..) => write!(f, "or"),
-            Instruction::Neg(..) => write!(f, "neg"),
-            Instruction::Not(..) => write!(f, "not"),
-            Instruction::Eq(..) => write!(f, "eq"),
-            Instruction::Neq(..) => write!(f, "neq"),
-            Instruction::Lt(..) => write!(f, "lt"),
-            Instruction::Lte(..) => write!(f, "lte"),
-            Instruction::Gt(..) => write!(f, "gt"),
-            Instruction::Gte(..) => write!(f, "gte"),
-            Instruction::Return(..) => write!(f, "return"),
-            Instruction::Call(..) => write!(f, "call"),
-            Instruction::Jump(..) => write!(f, "jump"),
-            Instruction::Branch(..) => write!(f, "branch"),
-            Instruction::Id(..) => write!(f, "id"),
+            Instruction::Const(dst, lit) => {
+                write!(f, "{}: {} const = {lit}", dst.0, dst.1)
+            }
+            Instruction::Add(dst, lhs, rhs) => {
+                write!(f, "{} : {} = add {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Sub(dst, lhs, rhs) => {
+                write!(f, "{} : {} = sub {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Mul(dst, lhs, rhs) => {
+                write!(f, "{} : {} = mul {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Div(dst, lhs, rhs) => {
+                write!(f, "{} : {} = div {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::And(dst, lhs, rhs) => {
+                write!(f, "{} : {} = and {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Or(dst, lhs, rhs) => {
+                write!(f, "{} : {} = or {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Neg(dst, operand) => {
+                write!(f, "{} : {} = neg {operand}", dst.0, dst.1)
+            }
+            Instruction::Not(dst, operand) => {
+                write!(f, "{} : {} = not {operand}", dst.0, dst.1)
+            }
+            Instruction::Eq(dst, lhs, rhs) => {
+                write!(f, "{} : {} = or {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Neq(dst, lhs, rhs) => {
+                write!(f, "{} : {} = or {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Lt(dst, lhs, rhs) => {
+                write!(f, "{} : {} = or {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Lte(dst, lhs, rhs) => {
+                write!(f, "{} : {} = or {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Gt(dst, lhs, rhs) => {
+                write!(f, "{} : {} = or {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Gte(dst, lhs, rhs) => {
+                write!(f, "{} : {} = or {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Return(value) => write!(f, "return {value}"),
+            Instruction::Call(def, args) => {
+                write!(f, "@{}", def.0)?;
+                for arg in args {
+                    write!(f, "{arg} ")?;
+                }
+                write!(f, "")
+            }
+            Instruction::Jump(target) => write!(f, "jump {}", target),
+            Instruction::Branch(cond, then_target, else_target) => {
+                write!(f, "br {} {then_target} {else_target}", cond.0)
+            }
+            Instruction::Id(dst, value) => {
+                write!(f, "{} : {} = id {value}", dst.0, dst.1)
+            }
             Instruction::Nop => write!(f, "nop"),
             Instruction::Label(addr) => write!(f, "__LABEL_{addr}"),
         }
