@@ -990,15 +990,14 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 self.level += 1;
                 let mut code = vec![];
                 for stmt_ref in stmts {
-                    let (_, mut block) = if let Some(stmt) =
-                        self.ast.get_stmt(*stmt_ref)
-                    {
-                        self.visit_stmt(stmt)
-                    } else {
-                        unreachable!(
+                    let (_, mut block) =
+                        if let Some(stmt) = self.ast.get_stmt(*stmt_ref) {
+                            self.visit_stmt(stmt)
+                        } else {
+                            unreachable!(
                             "Expected right handside to be a valid expression"
                         )
-                    };
+                        };
 
                     code.append(&mut block);
                 }
@@ -1040,15 +1039,14 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 then_block,
                 else_block,
             } => {
-                let (condition, mut code) = if let Some(cond) =
-                    self.ast.get_expr(*condition)
-                {
-                    self.visit_expr(cond)
-                } else {
-                    unreachable!(
+                let (condition, mut code) =
+                    if let Some(cond) = self.ast.get_expr(*condition) {
+                        self.visit_expr(cond)
+                    } else {
+                        unreachable!(
                         "Expected condition to reference a valid expression"
                     )
-                };
+                    };
                 let then_label = self.next_label();
                 let else_label = self.next_label();
                 let end_label = self.next_label();
@@ -1064,15 +1062,14 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 let inst = Instruction::label(then_label);
                 code.push(inst);
                 // Generate instruction for the then block.
-                let (_, mut block) = if let Some(block) =
-                    self.ast.get_stmt(*then_block)
-                {
-                    self.visit_stmt(block)
-                } else {
-                    unreachable!(
+                let (_, mut block) =
+                    if let Some(block) = self.ast.get_stmt(*then_block) {
+                        self.visit_stmt(block)
+                    } else {
+                        unreachable!(
                         "Expected reference to block to be a valid statement"
                     )
-                };
+                    };
                 code.append(&mut block);
                 // Push a jump instruction to the end label iif the last
                 // instruction was not a return..
@@ -1145,15 +1142,14 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 let inst = Instruction::label(loop_body_label.clone());
                 code.push(inst);
                 // Generate the loop body block.
-                let (_, mut block) = if let Some(block) =
-                    self.ast.get_stmt(*body)
-                {
-                    self.visit_stmt(block)
-                } else {
-                    unreachable!(
+                let (_, mut block) =
+                    if let Some(block) = self.ast.get_stmt(*body) {
+                        self.visit_stmt(block)
+                    } else {
+                        unreachable!(
                         "Expected reference to body to be a valid statement"
                     )
-                };
+                    };
                 code.append(&mut block);
                 // Generate the iteration expression.
                 if iteration.is_some() {

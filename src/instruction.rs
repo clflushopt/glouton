@@ -1,5 +1,5 @@
 //! Glouton IR instructions.
-use std::fmt;
+use std::{fmt, marker::PhantomData};
 
 use crate::{ast, sema};
 
@@ -348,13 +348,33 @@ pub struct Function {
 /// being currently lowered, a scope enum value to deal with nesting
 /// and a pointer to the symbol table level we start symbol resolution
 /// from.
-struct IRBuilderTrackingRef(usize, Scope, usize);
+struct IRBuilderTrackingRef(Scope, usize, usize);
 
 /// `LocationLabelCounter` is a tuple of variable and label counters used
 /// to generate monotonically increasing indices for temporaries and labels.
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 struct LocationLabelCounter(usize, usize);
 
+impl LocationLabelCounter {
+    fn new() -> Self {
+        Self(0, 0)
+    }
+
+    fn next_location(&mut self) -> usize {
+        let next = self.0;
+        self.0 += 1;
+        next
+    }
+
+    fn next_label(&mut self) -> usize {
+        let next = self.1;
+        self.1 += 1;
+        next
+    }
+}
+
 /// `GlobalValue` is a tuple of variable name and a compile time literal.
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 struct GlobalValue(Symbol, Literal);
 
 /// `IRBuilder` is responsible for lowering the AST to the intermediate
