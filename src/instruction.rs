@@ -229,9 +229,9 @@ enum Instruction {
     Jump(Label /* Offset */),
     // Condtional branches.
     Branch(
-        Symbol, /* Condition */
-        Label,  /* Then Target Offset */
-        Label,  /* Else Target Offset */
+        Value, /* Condition */
+        Label, /* Then Target Offset */
+        Label, /* Else Target Offset */
     ),
     // Identity operator.
     Id(Symbol /* Destination symbol*/, Value),
@@ -299,7 +299,7 @@ impl fmt::Display for Instruction {
             }
             Instruction::Jump(target) => write!(f, "jump {}", target),
             Instruction::Branch(cond, then_target, else_target) => {
-                write!(f, "br {} {then_target} {else_target}", cond.0)
+                write!(f, "br {} {then_target} {else_target}", cond)
             }
             Instruction::Id(dst, value) => {
                 write!(f, "{} : {} = id {value}", dst.0, dst.1)
@@ -409,8 +409,17 @@ impl IRBuilderTrackingRef {
         // so our position in the global program IR is increased by 1 since
         // the next unit will be a new function in the program.
         self.0 += 1;
+        // Decide if we are exiting back to a local scope or the top level
+        // global scope.
+        //
+        // If `self.1` is equal to `1` then we are exiting back to the global
+        // scope, otherwise we are still in a local scope.
+        if self.1 == 1 {
+            self.2 = Scope::Global;
+        } else {
+            self.2 = Scope::Local;
+        }
         self.1 -= 1;
-        self.2 = Scope::Global;
     }
 }
 
@@ -588,7 +597,8 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
             }
             // Blocks.
             ast::Stmt::Block(stmts) => {
-                self.level += 1;
+                // self.level += 1;
+                self.tracker.1 += 1;
                 let mut code = vec![];
                 for stmt_ref in stmts {
                     let (_, mut block) =
@@ -602,12 +612,13 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
 
                     code.append(&mut block);
                 }
-                self.level -= 1;
+                // self.level -= 1;
+                self.tracker.1 -= 1;
                 (None, code)
             }
             // Return statements.
             ast::Stmt::Return(expr_ref) => {
-                let (name, mut code) =
+                let (value, mut code) =
                     if let Some(expr) = self.ast.get_expr(*expr_ref) {
                         self.visit_expr(expr)
                     } else {
@@ -615,12 +626,12 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                             "Expected right handside to be a valid expression"
                         )
                     };
-
-                let ret = Instruction::ret(name.clone().expect(
+                let ret = Instruction::Return(value.expect(
                     "Expected right handside to be temporary or named",
                 ));
+
                 code.push(ret);
-                (name, code)
+                (value, code)
             }
             // Expression statements.
             ast::Stmt::Expr(expr_ref) => {
@@ -648,19 +659,19 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                         "Expected condition to reference a valid expression"
                     )
                     };
-                let then_label = self.next_label();
-                let else_label = self.next_label();
-                let end_label = self.next_label();
+                let then_label = self.llc.next_label();
+                let else_label = self.llc.next_label();
+                let end_label = self.llc.next_label();
 
                 // Push branch instruction.
-                let inst = Instruction::branch(
+                let inst = Instruction::Branch(
                     condition.expect("Expected condition variable to be valid"),
-                    then_label.clone(),
-                    else_label.clone(),
+                    Label(then_label),
+                    Label(else_label),
                 );
                 code.push(inst);
                 // Push then label.
-                let inst = Instruction::label(then_label);
+                let inst = Instruction::Label(then_label);
                 code.push(inst);
                 // Generate instruction for the then block.
                 let (_, mut block) =
@@ -678,11 +689,11 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                     OPCode::Return => false,
                     _ => true,
                 }) {
-                    let inst = Instruction::jmp(end_label.clone());
+                    let inst = Instruction::Jump(Label(end_label));
                     code.push(inst);
                 }
                 // Push else label.
-                let inst = Instruction::label(else_label);
+                let inst = Instruction::Label(else_label);
                 code.push(inst);
                 // Generate instruction for the else block if one exists.
                 if else_block.is_some() {
@@ -701,11 +712,11 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                     OPCode::Return => false,
                     _ => true,
                 }) {
-                    let inst = Instruction::jmp(end_label.clone());
+                    let inst = Instruction::Jump(Label(end_label));
                     code.push(inst);
                 }
                 // Push end label.
-                let inst = Instruction::label(end_label);
+                let inst = Instruction::Label(end_label);
                 code.push(inst);
 
                 (None, code)
@@ -725,8 +736,8 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                 body,
             } => {
                 // Generate labels for the loop.
-                let loop_body_label = self.next_label();
-                let loop_exit_label = self.next_label();
+                let loop_body_label = self.llc.next_label();
+                let loop_exit_label = self.llc.next_label();
                 let mut code = Vec::new();
                 // Generate initializer block if it exists.
                 if init.is_some() {
@@ -740,7 +751,7 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                     code.append(&mut block);
                 }
                 // Generate the loop body label.
-                let inst = Instruction::label(loop_body_label.clone());
+                let inst = Instruction::Label(loop_body_label);
                 code.push(inst);
                 // Generate the loop body block.
                 let (_, mut block) =
@@ -778,27 +789,27 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                     };
                     code.append(&mut block);
                     // Generate branch to exit code.
-                    let inst = Instruction::branch(
+                    let inst = Instruction::Branch(
                         condition
                             .expect("Expected condition variable to be valid"),
-                        loop_body_label.clone(),
-                        loop_exit_label.clone(),
+                        Label(loop_body_label),
+                        Label(loop_exit_label),
                     );
                     code.push(inst);
                 }
                 // Generate the loop exit code.
-                let inst = Instruction::label(loop_exit_label.clone());
+                let inst = Instruction::Label(loop_exit_label);
                 code.push(inst);
                 (None, code)
             }
             ast::Stmt::While { condition, body } => {
                 // Generate labels for the loop.
-                let loop_body_label = self.next_label();
-                let loop_exit_label = self.next_label();
+                let loop_body_label = self.llc.next_label();
+                let loop_exit_label = self.llc.next_label();
                 let mut code = Vec::new();
                 if body.is_some() {
                     // Generate the loop body label.
-                    let inst = Instruction::label(loop_body_label.clone());
+                    let inst = Instruction::Label(loop_body_label);
                     code.push(inst);
                     // Generate the loop body block.
                     let (_, mut block) = if let Some(block) = self.ast.get_stmt(
@@ -823,16 +834,16 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                     };
                     code.append(&mut block);
                     // Generate branch to exit code.
-                    let inst = Instruction::branch(
+                    let inst = Instruction::Branch(
                         condition
                             .expect("Expected condition variable to be valid"),
-                        loop_body_label.clone(),
-                        loop_exit_label.clone(),
+                        Label(loop_body_label),
+                        Label(loop_exit_label),
                     );
                     code.push(inst);
                 }
                 // Generate the loop exit code.
-                let inst = Instruction::label(loop_exit_label.clone());
+                let inst = Instruction::Label(loop_exit_label);
                 code.push(inst);
                 (None, code)
             }
@@ -843,19 +854,26 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
     fn visit_expr(
         &mut self,
         expr: &ast::Expr,
-    ) -> (Option<Value>, Vec<instruction::Instruction>) {
+    ) -> (Option<Value>, Vec<Instruction>) {
         match *expr {
             ast::Expr::IntLiteral(value) => {
                 let mut code = vec![];
-                let dst = self.next_var();
-                code.push(Instruction::constant(
-                    dst.clone(),
+                let dst = Symbol::new(
+                    format!("%v{}", self.llc.next_location()).as_str(),
                     Type::Int,
-                    Literal::Int(value),
-                ));
-                (Some(dst), code)
+                );
+                code.push(Instruction::Const(dst, Literal::Int(value)));
+                (Some(Value::StorageLocation(dst)), code)
             }
             ast::Expr::BoolLiteral(value) => {
+                let mut code = vec![];
+                let dst = Symbol::new(
+                    format!("%v{}", self.llc.next_location()).as_str(),
+                    Type::Int,
+                );
+                code.push(Instruction::Const(dst, Literal::Bool(value)));
+                (Some(Value::StorageLocation(dst)), code)
+                /*
                 let mut code = vec![];
                 let dst = self.next_var();
                 code.push(Instruction::constant(
@@ -864,8 +882,17 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                     Literal::Bool(value),
                 ));
                 (Some(dst), code)
+                 */
             }
             ast::Expr::CharLiteral(value) => {
+                let mut code = vec![];
+                let dst = Symbol::new(
+                    format!("%v{}", self.llc.next_location()).as_str(),
+                    Type::Int,
+                );
+                code.push(Instruction::Const(dst, Literal::Char(value)));
+                (Some(Value::StorageLocation(dst)), code)
+                /*
                 let mut code = vec![];
                 let dst = self.next_var();
                 code.push(Instruction::constant(
