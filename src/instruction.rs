@@ -1,7 +1,7 @@
 //! Glouton IR instructions.
-use std::{fmt, marker::PhantomData};
+use std::fmt;
 
-use crate::{ast, ir::Argument, sema};
+use crate::{ast, ast::Visitor, sema};
 
 /// Types used in the IR.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -77,6 +77,12 @@ impl Symbol {
     }
 }
 
+impl fmt::Display for Symbol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.0, self.1)
+    }
+}
+
 /// Labels are used to designate branch targets in control flow operations.
 ///
 /// Each label is a relative offset to the target branch first instruction.
@@ -85,7 +91,7 @@ pub struct Label(usize);
 
 impl fmt::Display for Label {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "__LABEL_{}", self.0)
+        write!(f, ".LABEL_{}", self.0)
     }
 }
 
@@ -145,6 +151,23 @@ pub enum OPCode {
     Nop,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum BinaryOperator {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Eq,
+    Neq,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum UnaryOperator {}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Instruction {
     // `const` operation.
@@ -152,6 +175,22 @@ enum Instruction {
         Symbol,  /* Destination */
         Literal, /* Literal value assigned to the destination */
     ),
+    /*
+        // Should we compress or decompress the IR, what is the difference
+        // between a compact operation where operator is part of instruction
+        // versus, operator is the instruction.
+        BinaryOp(
+            Symbol,         /* Destination */
+            BinaryOperator, /* Operator */
+            Value,          /* LHS */
+            Value,          /* RHS */
+        ),
+        UnaryOp(
+            Symbol,        /* Destination */
+            UnaryOperator, /* Operator */
+            Value,         /* RHS */
+        ),
+    */
     // Arithmetic operators.
     Add(
         Symbol, /* Destination */
@@ -222,6 +261,7 @@ enum Instruction {
     Return(Value /* Return value */),
     // Function calls.
     Call(
+        Symbol,     /* Destination (return value) */
         Symbol,     /* Call Target */
         Vec<Value>, /* Arguments */
     ),
@@ -245,67 +285,67 @@ impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Instruction::Const(dst, lit) => {
-                write!(f, "{}: {} const = {lit}", dst.0, dst.1)
+                write!(f, "{}: {} = const {lit}", dst.0, dst.1)
             }
             Instruction::Add(dst, lhs, rhs) => {
-                write!(f, "{} : {} = add {lhs} {rhs}", dst.0, dst.1)
+                write!(f, "{}: {} = add {lhs} {rhs}", dst.0, dst.1)
             }
             Instruction::Sub(dst, lhs, rhs) => {
-                write!(f, "{} : {} = sub {lhs} {rhs}", dst.0, dst.1)
+                write!(f, "{}: {} = sub {lhs} {rhs}", dst.0, dst.1)
             }
             Instruction::Mul(dst, lhs, rhs) => {
-                write!(f, "{} : {} = mul {lhs} {rhs}", dst.0, dst.1)
+                write!(f, "{}: {} = mul {lhs} {rhs}", dst.0, dst.1)
             }
             Instruction::Div(dst, lhs, rhs) => {
-                write!(f, "{} : {} = div {lhs} {rhs}", dst.0, dst.1)
+                write!(f, "{}: {} = div {lhs} {rhs}", dst.0, dst.1)
             }
             Instruction::And(dst, lhs, rhs) => {
-                write!(f, "{} : {} = and {lhs} {rhs}", dst.0, dst.1)
+                write!(f, "{}: {} = and {lhs} {rhs}", dst.0, dst.1)
             }
             Instruction::Or(dst, lhs, rhs) => {
-                write!(f, "{} : {} = or {lhs} {rhs}", dst.0, dst.1)
+                write!(f, "{}: {} = or {lhs} {rhs}", dst.0, dst.1)
             }
             Instruction::Neg(dst, operand) => {
-                write!(f, "{} : {} = neg {operand}", dst.0, dst.1)
+                write!(f, "{}: {} = neg {operand}", dst.0, dst.1)
             }
             Instruction::Not(dst, operand) => {
-                write!(f, "{} : {} = not {operand}", dst.0, dst.1)
+                write!(f, "{}: {} = not {operand}", dst.0, dst.1)
             }
             Instruction::Eq(dst, lhs, rhs) => {
-                write!(f, "{} : {} = or {lhs} {rhs}", dst.0, dst.1)
+                write!(f, "{}: {} = eq {lhs} {rhs}", dst.0, dst.1)
             }
             Instruction::Neq(dst, lhs, rhs) => {
-                write!(f, "{} : {} = or {lhs} {rhs}", dst.0, dst.1)
+                write!(f, "{}: {} = neq {lhs} {rhs}", dst.0, dst.1)
             }
             Instruction::Lt(dst, lhs, rhs) => {
-                write!(f, "{} : {} = or {lhs} {rhs}", dst.0, dst.1)
+                write!(f, "{}: {} = lt {lhs} {rhs}", dst.0, dst.1)
             }
             Instruction::Lte(dst, lhs, rhs) => {
-                write!(f, "{} : {} = or {lhs} {rhs}", dst.0, dst.1)
+                write!(f, "{}: {} = lte {lhs} {rhs}", dst.0, dst.1)
             }
             Instruction::Gt(dst, lhs, rhs) => {
-                write!(f, "{} : {} = or {lhs} {rhs}", dst.0, dst.1)
+                write!(f, "{}: {} = gt {lhs} {rhs}", dst.0, dst.1)
             }
             Instruction::Gte(dst, lhs, rhs) => {
-                write!(f, "{} : {} = or {lhs} {rhs}", dst.0, dst.1)
+                write!(f, "{}: {} = gte {lhs} {rhs}", dst.0, dst.1)
             }
-            Instruction::Return(value) => write!(f, "return {value}"),
-            Instruction::Call(def, args) => {
-                write!(f, "@{}", def.0)?;
+            Instruction::Return(value) => write!(f, "ret {value}"),
+            Instruction::Call(dst, def, args) => {
+                write!(f, "{}: {} = call @{}", dst.0, dst.1, def.0)?;
                 for arg in args {
-                    write!(f, "{arg} ")?;
+                    write!(f, " {arg}")?;
                 }
                 write!(f, "")
             }
-            Instruction::Jump(target) => write!(f, "jump {}", target),
+            Instruction::Jump(target) => write!(f, "jmp {}", target),
             Instruction::Branch(cond, then_target, else_target) => {
                 write!(f, "br {} {then_target} {else_target}", cond)
             }
             Instruction::Id(dst, value) => {
-                write!(f, "{} : {} = id {value}", dst.0, dst.1)
+                write!(f, "{}: {} = id {value}", dst.0, dst.1)
             }
             Instruction::Nop => write!(f, "nop"),
-            Instruction::Label(addr) => write!(f, "__LABEL_{addr}"),
+            Instruction::Label(addr) => write!(f, ".LABEL_{addr}"),
         }
     }
 }
@@ -374,6 +414,33 @@ impl Function {
 
     fn push(&mut self, inst: &Instruction) {
         self.body.push(inst.clone())
+    }
+}
+
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "@{}", self.name)?;
+
+        if !self.args.is_empty() {
+            write!(f, "(")?;
+
+            for (i, arg) in self.args.iter().enumerate() {
+                if i != 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{arg}")?;
+            }
+            write!(f, ")")?;
+        }
+
+        write!(f, ": {}", self.return_type)?;
+
+        writeln!(f, " {{")?;
+
+        for inst in &self.body {
+            writeln!(f, "   {inst}")?;
+        }
+        writeln!(f, "}}")
     }
 }
 
@@ -473,6 +540,16 @@ pub struct IRBuilder<'a> {
 }
 
 impl<'a> IRBuilder<'a> {
+    pub fn new(ast: &'a ast::AST, symbol_table: &'a sema::SymbolTable) -> Self {
+        Self {
+            program: vec![],
+            globals: vec![],
+            llc: LocationLabelCounter(0, 0),
+            tracker: IRBuilderTrackingRef(0, 0, Scope::Global),
+            ast,
+            symbol_table,
+        }
+    }
     /// Push a slice of instructions to the current function's body.
     fn push(&mut self, instrs: &[Instruction]) {
         match self.tracker.scope() {
@@ -493,7 +570,17 @@ impl<'a> IRBuilder<'a> {
                 }
             }
         }
-        for inst in instrs {}
+    }
+
+    /// Returns a non-mutable reference to the program functions.
+    pub const fn functions(&self) -> &Vec<Function> {
+        &self.program
+    }
+
+    pub fn gen(&mut self) {
+        for decl in self.ast.declarations() {
+            let _ = self.visit_decl(decl);
+        }
     }
 }
 
@@ -626,7 +713,7 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                             "Expected right handside to be a valid expression"
                         )
                     };
-                let ret = Instruction::Return(value.expect(
+                let ret = Instruction::Return(value.clone().expect(
                     "Expected right handside to be temporary or named",
                 ));
 
@@ -795,6 +882,7 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                         Label(loop_body_label),
                         Label(loop_exit_label),
                     );
+
                     code.push(inst);
                 }
                 // Generate the loop exit code.
@@ -862,51 +950,38 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                     format!("%v{}", self.llc.next_location()).as_str(),
                     Type::Int,
                 );
-                code.push(Instruction::Const(dst, Literal::Int(value)));
+                code.push(Instruction::Const(dst.clone(), Literal::Int(value)));
                 (Some(Value::StorageLocation(dst)), code)
             }
             ast::Expr::BoolLiteral(value) => {
                 let mut code = vec![];
                 let dst = Symbol::new(
                     format!("%v{}", self.llc.next_location()).as_str(),
-                    Type::Int,
-                );
-                code.push(Instruction::Const(dst, Literal::Bool(value)));
-                (Some(Value::StorageLocation(dst)), code)
-                /*
-                let mut code = vec![];
-                let dst = self.next_var();
-                code.push(Instruction::constant(
-                    dst.clone(),
                     Type::Bool,
+                );
+                code.push(Instruction::Const(
+                    dst.clone(),
                     Literal::Bool(value),
                 ));
-                (Some(dst), code)
-                 */
+                (Some(Value::StorageLocation(dst)), code)
             }
             ast::Expr::CharLiteral(value) => {
                 let mut code = vec![];
                 let dst = Symbol::new(
                     format!("%v{}", self.llc.next_location()).as_str(),
-                    Type::Int,
-                );
-                code.push(Instruction::Const(dst, Literal::Char(value)));
-                (Some(Value::StorageLocation(dst)), code)
-                /*
-                let mut code = vec![];
-                let dst = self.next_var();
-                code.push(Instruction::constant(
-                    dst.clone(),
                     Type::Char,
+                );
+                code.push(Instruction::Const(
+                    dst.clone(),
                     Literal::Char(value),
                 ));
-                (Some(dst), code)
+                (Some(Value::StorageLocation(dst)), code)
             }
             ast::Expr::UnaryOp { operator, operand } => {
                 // TODO: Visitor for IR will return a lhs assignee and an instruction
                 // for the rhs assignment.
                 // let src = self.visit_expr(self.ast.get_expr(operand).unwrap());
-                let (name, mut code) =
+                let (operand, mut code) =
                     if let Some(expr) = self.ast.get_expr(operand) {
                         self.visit_expr(expr)
                     } else {
@@ -915,31 +990,49 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                         )
                     };
 
-                let dst = self.next_var();
-                let inst = match operator {
-                    ast::UnaryOperator::Neg => Instruction::arith(
-                        dst.clone(),
+                let dst = match operator {
+                    ast::UnaryOperator::Neg => Symbol::new(
+                        format!("%v{}", self.llc.next_location()).as_str(),
                         Type::Int,
-                        ValueOp::Neg,
-                        vec![name
-                            .expect(
-                                "Expected right handside to be in a temporary",
-                            )
-                            .clone()],
                     ),
-                    ast::UnaryOperator::Not => Instruction::arith(
-                        dst.clone(),
+                    ast::UnaryOperator::Not => Symbol::new(
+                        format!("%v{}", self.llc.next_location()).as_str(),
                         Type::Bool,
-                        ValueOp::Not,
-                        vec![name
-                            .expect(
-                                "Expected right handside to be in a temporary",
-                            )
-                            .clone()],
+                    ),
+                };
+                // Is this three address code ??!!!
+                // A: Yes it is three address code.
+                // Shouldn't `Neg(Value)` be what we generate here as an instruction
+                // and `dst` the storage location for this instruction is returned ?
+                //
+                // - No because then we would need to encode the notion of assignment
+                // in the IR, having `dst` as part of the instructio.
+                //
+                // So visit_xxx returns :
+                // - (None, code) => For most statements.
+                // - (Symbol, code) => For most expressions e.g int x = -1
+                // (x, Neg(Value(Literal(-1)))) whoever consumes it doesn't need `x`
+                // but in SSA form we want `x` because whoever consumes it will operate
+                // on `x` instead of `code`. ?
+                //
+                // Think about this
+                let _dst = dst.clone();
+                let inst = match operator {
+                    ast::UnaryOperator::Neg => Instruction::Neg(
+                        dst,
+                        operand.expect(
+                            "Expected right handside to be in a temporary",
+                        ),
+                    ),
+                    ast::UnaryOperator::Not => Instruction::Not(
+                        dst,
+                        operand.expect(
+                            "Expected right handside to be in a temporary",
+                        ),
                     ),
                 };
                 code.push(inst);
-                (Some(dst), code)
+                (Some(Value::StorageLocation(_dst)), code)
             }
             ast::Expr::BinOp {
                 left,
@@ -967,59 +1060,46 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                     };
                 code.append(&mut code_right);
 
-                let dst = self.next_var();
-                let inst = match operator {
+                let t = match operator {
                     ast::BinaryOperator::Add
                     | ast::BinaryOperator::Sub
                     | ast::BinaryOperator::Mul
-                    | ast::BinaryOperator::Div => Instruction::arith(
-                        dst.clone(),
-                        Type::Int,
-                        ValueOp::from(&operator),
-                        vec![
-                            lhs.expect(
-                                "Expected right handside to be in a temporary",
-                            )
-                            .clone(),
-                            rhs.expect(
-                                "Expected right handside to be in a temporary",
-                            )
-                            .clone(),
-                        ],
-                    ),
-                    ast::BinaryOperator::Eq
-                    | ast::BinaryOperator::Neq
-                    | ast::BinaryOperator::Gt
-                    | ast::BinaryOperator::Gte
-                    | ast::BinaryOperator::Lt
-                    | ast::BinaryOperator::Lte => Instruction::cmp(
-                        dst.clone(),
-                        Type::Bool,
-                        ValueOp::from(&operator),
-                        vec![
-                            lhs.expect(
-                                "Expected right handside to be in a temporary",
-                            )
-                            .clone(),
-                            rhs.expect(
-                                "Expected right handside to be in a temporary",
-                            )
-                            .clone(),
-                        ],
-                    ),
+                    | ast::BinaryOperator::Div => Type::Int,
+                    _ => Type::Bool,
+                };
+
+                let dst = Symbol::new(
+                    format!("%v{}", self.llc.next_location()).as_str(),
+                    t,
+                );
+                let lhs = lhs.expect("Expected valid left handside value");
+                let rhs = rhs.expect("Expected valid right handside value");
+                let _dst = dst.clone();
+                let inst = match operator {
+                    ast::BinaryOperator::Add => Instruction::Add(dst, lhs, rhs),
+                    ast::BinaryOperator::Sub => Instruction::Sub(dst, lhs, rhs),
+                    ast::BinaryOperator::Mul => Instruction::Mul(dst, lhs, rhs),
+                    ast::BinaryOperator::Div => Instruction::Div(dst, lhs, rhs),
+                    ast::BinaryOperator::Eq => Instruction::Eq(dst, lhs, rhs),
+                    ast::BinaryOperator::Neq => Instruction::Neq(dst, lhs, rhs),
+                    ast::BinaryOperator::Gt => Instruction::Gt(dst, lhs, rhs),
+                    ast::BinaryOperator::Gte => Instruction::Gte(dst, lhs, rhs),
+                    ast::BinaryOperator::Lt => Instruction::Lt(dst, lhs, rhs),
+                    ast::BinaryOperator::Lte => Instruction::Lte(dst, lhs, rhs),
                 };
 
                 code.push(inst);
-                (Some(dst), code)
+                (Some(Value::StorageLocation(_dst)), code)
             }
             ast::Expr::Named(ref name) => {
-                let _t = match self.symbol_table.find(name, self.level) {
+                let _t = match self.symbol_table.find(name, self.tracker.1) {
                     Some(symbol) => symbol.t(),
                     None => unreachable!(
                         "Expected a symbol for named expression : `{name}`"
                     ),
                 };
-                (Some(name.clone()), vec![])
+                let name = Symbol::new(name, Type::from(&_t));
+                (Some(Value::StorageLocation(name)), vec![])
             }
             ast::Expr::Grouping(expr_ref) => {
                 let (name, code) =
@@ -1053,9 +1133,13 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                         "Expected right handside to be a valid expression"
                     )
                 };
-                let t = match self
-                    .symbol_table
-                    .find(&lhs.clone().unwrap(), self.level)
+                let location = match lhs {
+                    Some(Value::StorageLocation(ref sym)) => sym.0.clone(),
+                    _ => unreachable!(
+                        "Expected assignment lvalue to be a storage location"
+                    ),
+                };
+                let t = match self.symbol_table.find(&location, self.tracker.1)
                 {
                     Some(symbol) => symbol.t(),
                     None => unreachable!(
@@ -1063,25 +1147,27 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                         lhs.unwrap()
                     ),
                 };
-                code.push(Instruction::id(
-                    lhs.clone().unwrap(),
-                    Type::from(&t),
-                    vec![rhs.unwrap()],
-                ));
-                (lhs, code)
+                let inst = Instruction::Id(
+                    Symbol::new(&location, Type::from(&t)),
+                    rhs.expect(
+                        "Expected assignment rvalue to be a valid value",
+                    ),
+                );
+                code.push(inst);
+                (lhs.clone(), code)
             }
             ast::Expr::Call { name, ref args } => {
                 let name = match self.ast.get_expr(name) {
                     Some(ast::Expr::Named(name)) => name,
                     _ => unreachable!("Expected reference to be a named expression for a function"),
                 };
-                let t = match self.symbol_table.find(name, self.level) {
+                let t = match self.symbol_table.find(name, self.tracker.1) {
                     Some(symbol) => symbol.t(),
                     None => unreachable!(
                         "Expected a symbol for named expression : `{name}`"
                     ),
                 };
-                let (vars, code): (Vec<String>, Vec<Vec<Instruction>>) = args
+                let (vars, code): (Vec<Value>, Vec<Vec<Instruction>>) = args
                     .iter()
                     .map(|arg| {
                         if let Some(expr) = self.ast.get_expr(*arg) {
@@ -1094,18 +1180,432 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                         }
                     })
                     .unzip();
+
                 let mut code: Vec<Instruction> =
                     code.into_iter().flatten().collect();
-                let dst = self.next_var();
-                let inst = Instruction::call(
-                    dst.clone(),
+                let dst = Symbol::new(
+                    format!("%v{}", self.llc.next_location()).as_str(),
                     Type::from(&t),
-                    name.to_string(),
+                );
+                let inst = Instruction::Call(
+                    dst.clone(),
+                    Symbol::new(name, Type::from(&t)),
                     vars,
                 );
                 code.push(inst);
-                (Some(dst), code)
+                (Some(Value::StorageLocation(dst)), code)
             }
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::Parser;
+    use crate::scanner::Scanner;
+    use crate::sema::analyze;
+
+    // Macro to generate test cases.
+    macro_rules! test_ir_gen {
+        ($name:ident, $source:expr, $expected:expr) => {
+            #[test]
+            fn $name() {
+                let source = $source;
+                let mut scanner = Scanner::new(source);
+                let tokens = scanner
+                    .scan()
+                    .expect("expected test case source to be valid");
+                let mut parser = Parser::new(&tokens);
+                parser.parse();
+                let symbol_table = analyze(parser.ast());
+                println!("{symbol_table}");
+
+                let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
+                irgen.gen();
+
+                let mut actual = "".to_string();
+                for func in irgen.functions() {
+                    // println!("{func}");
+                    actual.push_str(format!("{func}").as_str());
+                }
+                // For readability trim the newlines at the start and end
+                // of our IR text fixture.
+                let expected = $expected
+                    .strip_suffix("\n")
+                    .and($expected.strip_prefix("\n"));
+                assert_eq!(actual, expected.unwrap())
+            }
+        };
+    }
+
+    test_ir_gen!(
+        can_generate_const_ops,
+        "int main() { return 0;}",
+        r#"
+@main: int {
+   %v0: int = const 0
+   ret %v0
+}
+"#
+    );
+
+    test_ir_gen!(
+        can_generate_unary_ops,
+        "int main() { bool a = !true; return 0;}",
+        r#"
+@main: int {
+   %v0: bool = const true
+   %v1: bool = not %v0
+   a: bool = id %v1
+   %v2: int = const 0
+   ret %v2
+}
+"#
+    );
+    test_ir_gen!(
+        can_generate_multiple_assignments,
+        r#"int main() {
+            bool a = !true;
+            bool b = !false;
+            bool c = !a;
+            bool d = !b;
+            int e = 12345679;
+            int f = -e;
+            return f;
+        }"#,
+        r#"
+@main: int {
+   %v0: bool = const true
+   %v1: bool = not %v0
+   a: bool = id %v1
+   %v2: bool = const false
+   %v3: bool = not %v2
+   b: bool = id %v3
+   %v4: bool = not a
+   c: bool = id %v4
+   %v5: bool = not b
+   d: bool = id %v5
+   %v6: int = const 12345679
+   e: int = id %v6
+   %v7: int = neg e
+   f: int = id %v7
+   ret f
+}
+"#
+    );
+    test_ir_gen!(
+        can_generate_function_arguments,
+        "int main() {} int f(int a, int b) { return a + b;}",
+        r#"
+@main: int {
+}
+@f(a: int, b: int): int {
+   %v0: int = add a b
+   ret %v0
+}
+"#
+    );
+    test_ir_gen!(
+        can_generate_binary_ops,
+        r#"int main() {
+            int a = 1 + 1;
+            int b = 2 - 2;
+            int c = 3 * 3;
+            int d = 4 / 4;
+            bool e = a == b;
+            bool f = b != c;
+            bool g = c > d;
+            bool h = c >= d;
+            bool i = d < c;
+            bool j = d <= c;
+            return 0;
+        }"#,
+        r#"
+@main: int {
+   %v0: int = const 1
+   %v1: int = const 1
+   %v2: int = add %v0 %v1
+   a: int = id %v2
+   %v3: int = const 2
+   %v4: int = const 2
+   %v5: int = sub %v3 %v4
+   b: int = id %v5
+   %v6: int = const 3
+   %v7: int = const 3
+   %v8: int = mul %v6 %v7
+   c: int = id %v8
+   %v9: int = const 4
+   %v10: int = const 4
+   %v11: int = div %v9 %v10
+   d: int = id %v11
+   %v12: bool = eq a b
+   e: bool = id %v12
+   %v13: bool = neq b c
+   f: bool = id %v13
+   %v14: bool = gt c d
+   g: bool = id %v14
+   %v15: bool = gte c d
+   h: bool = id %v15
+   %v16: bool = lt d c
+   i: bool = id %v16
+   %v17: bool = lte d c
+   j: bool = id %v17
+   %v18: int = const 0
+   ret %v18
+}
+"#
+    );
+    test_ir_gen!(
+        can_generate_assignment,
+        r#"int main() {
+            int a;
+            a = 42;
+            return a;
+}"#,
+        r#"
+@main: int {
+   %v0: int = const 0
+   a: int = id %v0
+   %v1: int = const 42
+   a: int = id %v1
+   ret a
+}
+"#
+    );
+    test_ir_gen!(
+        can_generate_assignments,
+        r#"int main() {
+            int a;
+            int b;
+            int c = 42;
+            a = c;
+            b = a;
+            return b;
+        }"#,
+        r#"
+@main: int {
+   %v0: int = const 0
+   a: int = id %v0
+   %v1: int = const 0
+   b: int = id %v1
+   %v2: int = const 42
+   c: int = id %v2
+   a: int = id c
+   b: int = id a
+   ret b
+}
+"#
+    );
+    test_ir_gen!(
+        can_generate_function_calls,
+        r#"
+        int f(int a, int b) { return a + b;}
+            int main() {
+                return f(1,2);
+            }
+        "#,
+        r#"
+@f(a: int, b: int): int {
+   %v0: int = add a b
+   ret %v0
+}
+@main: int {
+   %v1: int = const 1
+   %v2: int = const 2
+   %v3: int = call @f %v1 %v2
+   ret %v3
+}
+"#
+    );
+    test_ir_gen!(
+        can_generate_if_block_without_else_branch,
+        r#"
+        int main() {
+            int a = 42;
+            int b = 17;
+            if (a > b) {
+                return a - b;
+            }
+            return a + b;
+        }
+        "#,
+        r#"
+@main: int {
+   %v0: int = const 42
+   a: int = id %v0
+   %v1: int = const 17
+   b: int = id %v1
+   %v2: bool = gt a b
+   br %v2 .LABEL_0 .LABEL_1
+   .LABEL_0
+   %v3: int = sub a b
+   ret %v3
+   .LABEL_1
+   jmp .LABEL_2
+   .LABEL_2
+   %v4: int = add a b
+   ret %v4
+}
+"#
+    );
+    test_ir_gen!(
+        can_generate_for_loop,
+        r#"
+            int main() {
+                int i = 0;
+                int x = 0;
+                for (i = 1;i <= 100;i = i+1) {
+                    x = i + 1;
+                }
+                return 0;
+            }
+        "#,
+        r#"
+@main: int {
+   %v0: int = const 0
+   i: int = id %v0
+   %v1: int = const 0
+   x: int = id %v1
+   %v2: int = const 1
+   i: int = id %v2
+   .LABEL_0
+   %v3: int = const 1
+   %v4: int = add i %v3
+   x: int = id %v4
+   %v5: int = const 1
+   %v6: int = add i %v5
+   i: int = id %v6
+   %v7: int = const 100
+   %v8: bool = lte i %v7
+   br %v8 .LABEL_0 .LABEL_1
+   .LABEL_1
+   %v9: int = const 0
+   ret %v9
+}
+"#
+    );
+    test_ir_gen!(
+        can_generate_while_loop,
+        r#"
+            int main() {
+                int i = 0;
+                int x = 0;
+                while (i <= 100) {
+                    x = x + 1;
+                    i = i + 1;
+                }
+                return x;
+            }
+        "#,
+        r#"
+@main: int {
+   %v0: int = const 0
+   i: int = id %v0
+   %v1: int = const 0
+   x: int = id %v1
+   .LABEL_0
+   %v2: int = const 1
+   %v3: int = add x %v2
+   x: int = id %v3
+   %v4: int = const 1
+   %v5: int = add i %v4
+   i: int = id %v5
+   %v6: int = const 100
+   %v7: bool = lte i %v6
+   br %v7 .LABEL_0 .LABEL_1
+   .LABEL_1
+   ret x
+}
+"#
+    );
+
+    test_ir_gen!(
+        can_generate_nested_scopes,
+        r#"
+            int main() {
+                int i = 0;
+                int x = 0;
+                {
+                    int x = 1;
+                    int y = 2;
+                    int i = x + y;
+                }
+                return x;
+            }
+        "#,
+        r#"
+@main: int {
+   %v0: int = const 0
+   i: int = id %v0
+   %v1: int = const 0
+   x: int = id %v1
+   %v2: int = const 1
+   x: int = id %v2
+   %v3: int = const 2
+   y: int = id %v3
+   %v4: int = add x y
+   i: int = id %v4
+   ret x
+}
+"#
+    );
+
+    test_ir_gen!(
+        can_expand_nested_expressions,
+        r#"
+            int main() {
+                int x = (5 * 3 + (7 / 2) - 1) * 2/7;
+                int y = ((4 - 3) * (7 + 5)) * 1/7;
+                int z = (5 - 5) * (4 + 4 - 16);
+                int w = x * y - z;
+
+                return w;
+            }
+        "#,
+        r#"
+@main: int {
+   %v0: int = const 5
+   %v1: int = const 3
+   %v2: int = mul %v0 %v1
+   %v3: int = const 7
+   %v4: int = const 2
+   %v5: int = div %v3 %v4
+   %v6: int = add %v2 %v5
+   %v7: int = const 1
+   %v8: int = sub %v6 %v7
+   %v9: int = const 2
+   %v10: int = mul %v8 %v9
+   %v11: int = const 7
+   %v12: int = div %v10 %v11
+   x: int = id %v12
+   %v13: int = const 4
+   %v14: int = const 3
+   %v15: int = sub %v13 %v14
+   %v16: int = const 7
+   %v17: int = const 5
+   %v18: int = add %v16 %v17
+   %v19: int = mul %v15 %v18
+   %v20: int = const 1
+   %v21: int = mul %v19 %v20
+   %v22: int = const 7
+   %v23: int = div %v21 %v22
+   y: int = id %v23
+   %v24: int = const 5
+   %v25: int = const 5
+   %v26: int = sub %v24 %v25
+   %v27: int = const 4
+   %v28: int = const 4
+   %v29: int = add %v27 %v28
+   %v30: int = const 16
+   %v31: int = sub %v29 %v30
+   %v32: int = mul %v26 %v31
+   z: int = id %v32
+   %v33: int = mul x y
+   %v34: int = sub %v33 z
+   w: int = id %v34
+   ret w
+}
+"#
+    );
 }

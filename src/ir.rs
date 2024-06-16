@@ -1502,7 +1502,7 @@ mod tests {
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
                 let symbol_table = analyze(parser.ast());
-                println!("{symbol_table}");
+                // println!("{symbol_table}");
 
                 let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
                 irgen.gen();
