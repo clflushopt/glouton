@@ -596,7 +596,9 @@ impl<'a> SemanticAnalyzer<'a> {
                         );
                         DeclType::Int
                     }
-                    &ast::BinaryOperator::Eq
+                    &ast::BinaryOperator::And
+                    | &ast::BinaryOperator::Or
+                    | &ast::BinaryOperator::Eq
                     | &ast::BinaryOperator::Neq
                     | &ast::BinaryOperator::Gt
                     | &ast::BinaryOperator::Gte

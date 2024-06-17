@@ -179,6 +179,8 @@ impl ValueOp {
             ast::BinaryOperator::Lte => ValueOp::Lte,
             ast::BinaryOperator::Gt => ValueOp::Gt,
             ast::BinaryOperator::Gte => ValueOp::Gte,
+            ast::BinaryOperator::And => ValueOp::And,
+            ast::BinaryOperator::Or => ValueOp::Or,
         }
     }
 }
@@ -1344,7 +1346,9 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     ast::BinaryOperator::Add
                     | ast::BinaryOperator::Sub
                     | ast::BinaryOperator::Mul
-                    | ast::BinaryOperator::Div => Instruction::arith(
+                    | ast::BinaryOperator::Div
+                    | ast::BinaryOperator::And
+                    | ast::BinaryOperator::Or => Instruction::arith(
                         dst.clone(),
                         Type::Int,
                         ValueOp::from(&operator),

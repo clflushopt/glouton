@@ -1,4 +1,19 @@
-//! Glouton IR instructions.
+//! The glouton intermediate representation is a three-address code linear IR
+//! used to represent Glouton programs.
+//!
+//! This iteration of the implementation improves significantly on the initial
+//! design; with the actual instruction semantics remaining unchanged.
+//!
+//! `const` instruction exists to encode all literal values into a temporary
+//! storage location (virtual registers) and the `id` instruction similarly
+//! assigns named values to new temporaries.
+//!
+//! `const` and `id` are core to the way the IR is structured as they allow us
+//! to easily translate into and out of SSA form; with potentially translating
+//! out of SSA can forgo the rename phase and just prune all the phi nodes.
+//!
+//! This is okay since we don't care for having debug informations (DWARF) or
+//! otherwise.
 use std::fmt;
 
 use crate::{ast, ast::Visitor, sema};
@@ -63,17 +78,29 @@ impl fmt::Display for Literal {
         }
     }
 }
-/// Symbol references are used as an alternative to variable names.
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SymbolRef(usize /* Reference */, Type);
 
 /// Symbols can represent variable or function names.
+///
+/// TODO: Potentially rename `Symbol` to storage location since it acts more
+/// as a virtual register than a symbol; also let's keep the virtual register
+/// number so that building things like use-defs becomes a set of `usize` vs
+/// a set of `String`.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct Symbol(String, Type);
 
 impl Symbol {
     pub fn new(name: &str, t: Type) -> Self {
         Self(name.to_string(), t)
+    }
+
+    /// Returns a non-mutable reference to the symbol's name.
+    pub fn name(&self) -> &str {
+        &self.0
+    }
+
+    /// Returns the symbol's type.
+    pub fn t(&self) -> Type {
+        self.1
     }
 }
 
@@ -151,132 +178,57 @@ pub enum OPCode {
     Nop,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum BinaryOperator {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Eq,
-    Neq,
-    Gt,
-    Gte,
-    Lt,
-    Lte,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum UnaryOperator {}
-
+/// Instructions in the intermediate representation are in three-address form.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Instruction {
     // `const` operation.
-    Const(
-        Symbol,  /* Destination */
-        Literal, /* Literal value assigned to the destination */
-    ),
-    /*
-        // Should we compress or decompress the IR, what is the difference
-        // between a compact operation where operator is part of instruction
-        // versus, operator is the instruction.
-        BinaryOp(
-            Symbol,         /* Destination */
-            BinaryOperator, /* Operator */
-            Value,          /* LHS */
-            Value,          /* RHS */
-        ),
-        UnaryOp(
-            Symbol,        /* Destination */
-            UnaryOperator, /* Operator */
-            Value,         /* RHS */
-        ),
-    */
-    // Arithmetic operators.
-    Add(
-        Symbol, /* Destination */
-        Value,  /* LHS */
-        Value,  /* RHS */
-    ),
-    Sub(
-        Symbol, /* Destination */
-        Value,  /* LHS */
-        Value,  /* RHS */
-    ),
-    Mul(
-        Symbol, /* Destination */
-        Value,  /* LHS */
-        Value,  /* RHS */
-    ),
-    Div(
-        Symbol, /* Destination */
-        Value,  /* LHS */
-        Value,  /* RHS */
-    ),
-    // Binary boolean operators.
-    And(
-        Symbol, /* Destination */
-        Value,  /* LHS */
-        Value,  /* RHS */
-    ),
-    Or(
-        Symbol, /* Destination */
-        Value,  /* LHS */
-        Value,  /* RHS */
-    ),
+    Const(Symbol, Literal),
+    // Instructions for arithmetic operations are in three address form
+    // and wrap the storage location, left and right handside operands.
+    Add(Symbol, Value, Value),
+    Sub(Symbol, Value, Value),
+    Mul(Symbol, Value, Value),
+    Div(Symbol, Value, Value),
+    // Logical operations, similar to arithmetic operations but for boolean
+    // values.
+    And(Symbol, Value, Value),
+    Or(Symbol, Value, Value),
     // Unary operators.
-    Not(Symbol /* Destination */, Value /* LHS */),
-    Neg(Symbol /* Destination */, Value /* LHS */),
+    Not(Symbol, Value),
+    Neg(Symbol, Value),
     // Comparison operators.
-    Eq(
-        Symbol, /* Destination */
-        Value,  /* LHS */
-        Value,  /* RHS */
-    ),
-    Neq(
-        Symbol, /* Destination */
-        Value,  /* LHS */
-        Value,  /* RHS */
-    ),
-    Lt(
-        Symbol, /* Destination */
-        Value,  /* LHS */
-        Value,  /* RHS */
-    ),
-    Lte(
-        Symbol, /* Destination */
-        Value,  /* LHS */
-        Value,  /* RHS */
-    ),
-    Gt(
-        Symbol, /* Destination */
-        Value,  /* LHS */
-        Value,  /* RHS */
-    ),
-    Gte(
-        Symbol, /* Destination */
-        Value,  /* LHS */
-        Value,  /* RHS */
-    ),
+    Eq(Symbol, Value, Value),
+    Neq(Symbol, Value, Value),
+    Lt(Symbol, Value, Value),
+    Lte(Symbol, Value, Value),
+    Gt(Symbol, Value, Value),
+    Gte(Symbol, Value, Value),
     // Return statements.
-    Return(Value /* Return value */),
+    Return(Value),
     // Function calls.
     Call(
-        Symbol,     /* Destination (return value) */
-        Symbol,     /* Call Target */
-        Vec<Value>, /* Arguments */
+        // Storage location for the function call result.
+        Symbol,
+        // Called function name.
+        Symbol,
+        // Function arguments.
+        Vec<Value>,
     ),
     // Direct jump to label.
-    Jump(Label /* Offset */),
+    Jump(Label),
     // Condtional branches.
     Branch(
-        Value, /* Condition */
-        Label, /* Then Target Offset */
-        Label, /* Else Target Offset */
+        // Conditional value.
+        Value,
+        // Label for the `then` branch.
+        Label,
+        // Label for the `else` branch.
+        Label,
     ),
     // Identity operator.
-    Id(Symbol /* Destination symbol*/, Value),
+    Id(Symbol, Value),
     // Label pseudo instruction, acts as a data marker when generating code.
-    Label(usize /* Label handle or offset */),
+    Label(usize),
     // Nop instruction.
     Nop,
 }
@@ -978,9 +930,6 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                 (Some(Value::StorageLocation(dst)), code)
             }
             ast::Expr::UnaryOp { operator, operand } => {
-                // TODO: Visitor for IR will return a lhs assignee and an instruction
-                // for the rhs assignment.
-                // let src = self.visit_expr(self.ast.get_expr(operand).unwrap());
                 let (operand, mut code) =
                     if let Some(expr) = self.ast.get_expr(operand) {
                         self.visit_expr(expr)
@@ -1000,22 +949,6 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                         Type::Bool,
                     ),
                 };
-                // Is this three address code ??!!!
-                // A: Yes it is three address code.
-                // Shouldn't `Neg(Value)` be what we generate here as an instruction
-                // and `dst` the storage location for this instruction is returned ?
-                //
-                // - No because then we would need to encode the notion of assignment
-                // in the IR, having `dst` as part of the instructio.
-                //
-                // So visit_xxx returns :
-                // - (None, code) => For most statements.
-                // - (Symbol, code) => For most expressions e.g int x = -1
-                // (x, Neg(Value(Literal(-1)))) whoever consumes it doesn't need `x`
-                // but in SSA form we want `x` because whoever consumes it will operate
-                // on `x` instead of `code`. ?
-                //
-                // Think about this
                 let _dst = dst.clone();
                 let inst = match operator {
                     ast::UnaryOperator::Neg => Instruction::Neg(
@@ -1086,6 +1019,8 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                     ast::BinaryOperator::Gte => Instruction::Gte(dst, lhs, rhs),
                     ast::BinaryOperator::Lt => Instruction::Lt(dst, lhs, rhs),
                     ast::BinaryOperator::Lte => Instruction::Lte(dst, lhs, rhs),
+                    ast::BinaryOperator::And => Instruction::And(dst, lhs, rhs),
+                    ast::BinaryOperator::Or => Instruction::Or(dst, lhs, rhs),
                 };
 
                 code.push(inst);
@@ -1219,7 +1154,6 @@ mod tests {
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
                 let symbol_table = analyze(parser.ast());
-                println!("{symbol_table}");
 
                 let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
                 irgen.gen();
@@ -1260,6 +1194,23 @@ mod tests {
    a: bool = id %v1
    %v2: int = const 0
    ret %v2
+}
+"#
+    );
+
+    test_ir_gen!(
+        can_generate_binary_logical_ops,
+        "int main() { bool a = (true && false) || false; return 0;}",
+        r#"
+@main: int {
+   %v0: bool = const true
+   %v1: bool = const false
+   %v2: bool = and %v0 %v1
+   %v3: bool = const false
+   %v4: bool = or %v2 %v3
+   a: bool = id %v4
+   %v5: int = const 0
+   ret %v5
 }
 "#
     );

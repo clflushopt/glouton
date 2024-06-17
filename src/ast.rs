@@ -224,6 +224,9 @@ pub enum BinaryOperator {
     Gte,
     Lt,
     Lte,
+    // Logical operators.
+    And,
+    Or,
 }
 
 impl fmt::Display for BinaryOperator {
@@ -239,6 +242,8 @@ impl fmt::Display for BinaryOperator {
             Self::Gte => write!(f, "GTE"),
             Self::Lt => write!(f, "LT"),
             Self::Lte => write!(f, "LTE"),
+            Self::And => write!(f, "AND"),
+            Self::Or => write!(f, "OR"),
         }
     }
 }
@@ -611,6 +616,20 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                         BinaryOperator::Lte => {
                             format!(
                                 "LesserEqual({}, {})",
+                                self.visit_expr(left),
+                                self.visit_expr(right)
+                            )
+                        }
+                        BinaryOperator::And => {
+                            format!(
+                                "And({}, {})",
+                                self.visit_expr(left),
+                                self.visit_expr(right)
+                            )
+                        }
+                        BinaryOperator::Or => {
+                            format!(
+                                "Or({}, {})",
                                 self.visit_expr(left),
                                 self.visit_expr(right)
                             )

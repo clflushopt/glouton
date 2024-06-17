@@ -49,20 +49,7 @@ struct ConstantFold {}
 
 impl ConstantFold {}
 
-impl Transform for ConstantFold {
-    fn run(&self, function: &mut ir::Function) {
-        let mut bbs = function.form_basic_blocks();
-
-        for bb in &mut bbs {
-            for inst in bb.instructions_mut() {
-                match inst.opcode() {
-                    OPCode::Add | OPCode::Sub | OPCode::Mul | OPCode::Div => {}
-                    _ => (),
-                }
-            }
-        }
-    }
-}
+impl Transform for ConstantFold {}
 
 /// Common subexpression elimination pass replaces common subexpressions in
 /// a basic block by their previously computed values. The pass will in most

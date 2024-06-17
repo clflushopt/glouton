@@ -399,9 +399,12 @@ impl Parser {
         while prec < Self::get_token_precedence(self.peek()) {
             let infix_ref = match self.advance() {
                 // Arithmetic expressions.
-                &Token::Plus | &Token::Minus | &Token::Star | &Token::Slash => {
-                    self.binary(prefix_ref)
-                }
+                &Token::Plus
+                | &Token::Minus
+                | &Token::Star
+                | &Token::Slash
+                | &Token::And
+                | &Token::Or => self.binary(prefix_ref),
                 // Comparison expressions.
                 &Token::EqualEqual
                 | &Token::BangEqual
@@ -455,6 +458,8 @@ impl Parser {
             Token::Minus => BinaryOperator::Sub,
             Token::Star => BinaryOperator::Mul,
             Token::Slash => BinaryOperator::Div,
+            Token::And => BinaryOperator::And,
+            Token::Or => BinaryOperator::Or,
             // There is no infix operator.
             _ => unreachable!(
                 "Unknown token in binary expression {}",
@@ -637,7 +642,6 @@ mod tests {
                     .expect("Expected source code for test case to be valid !");
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
-                println!("AST: {}", parser.ast());
                 assert!(parser.ast().to_string().contains($expected));
             }
         };
@@ -887,5 +891,26 @@ Stmt(Expr(Assign(Named(i), Add(Named(i), 1)))),
         "FOR(INIT(Assign(Named(i), 1)), COND(), ITER(Assign(Named(i), Add(Named(i), 1))), Block {
 Stmt(Expr(Assign(Named(i), Add(Named(i), 1)))),
 })"
+    );
+
+    test_parser!(
+        can_parse_and_expressions,
+        r#"int main() { 
+        bool a = true;
+        bool b = true;
+
+        if (a && b) {
+            return 0;
+        }
+        return 1;
+         }"#,
+        "FUNCTION(main, INT_TYPE, ARGS(), Block {
+Stmt(VAR(BOOL_TYPE, a, true)),
+Stmt(VAR(BOOL_TYPE, b, true)),
+Stmt(IF(And(Named(a), Named(b)), Block {
+Stmt(Return(0)),
+})),
+Stmt(Return(1)),
+}"
     );
 }
