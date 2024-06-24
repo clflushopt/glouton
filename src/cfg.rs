@@ -86,7 +86,7 @@ impl Graph {
     pub fn new(program: &Vec<ir::Function>) -> Self {
         let mut blocks: Vec<BasicBlock> = Vec::new();
 
-        for mut function in program {
+        for function in program {
             let mut bbs = Self::form_basic_blocks(function);
             blocks.append(&mut bbs)
         }
@@ -102,12 +102,12 @@ impl Graph {
     /// Form a list of basic blocks from the function, the ownership of
     /// the returned `Vec` is transferred to the caller.
     pub fn form_basic_blocks(function: &ir::Function) -> Vec<BasicBlock> {
-        let mut blocks = Vec::new();
+        let mut worklist = Vec::new();
         let mut current = BasicBlock::new();
         for inst in function.instructions() {
             if inst.label() {
                 if !current.instructions().is_empty() {
-                    blocks.push(current)
+                    worklist.push(current)
                 }
                 match inst {
                     ir::Instruction::Label { .. } => {
@@ -119,12 +119,12 @@ impl Graph {
             } else {
                 current.push(inst);
                 if inst.terminator() {
-                    blocks.push(current);
+                    worklist.push(current);
                     current = BasicBlock::new();
                 }
             }
         }
-        blocks
+        worklist
     }
 
     /// Iterate over all the constructed basic blocks and assign them a label
@@ -133,13 +133,8 @@ impl Graph {
     fn assign_labels_to_blocks(&mut self) {
         for (index, block) in self.blocks.iter().enumerate() {
             if block.leader().is_some_and(|inst| inst.label()) {
-                if let ir::Instruction::Label(offset) = block.leader().unwrap()
-                {
-                    self.labels.insert(
-                        format!(".LABEL_{offset}"),
-                        ir::BlockRef(index),
-                    );
-                }
+                let label = block.leader().unwrap();
+                self.labels.insert(format!("{label}"), ir::BlockRef(index));
             } else {
                 let label = format!(".LABEL_{}", index);
                 self.labels.insert(label, ir::BlockRef(index));
@@ -148,7 +143,7 @@ impl Graph {
     }
 
     /// Compute a list of succesors for each basic block in the graph.
-    fn successors(&mut self) {
+    fn compute_successors(&mut self) {
         let mut successors = HashMap::new();
 
         for (label, block_ref) in &self.labels {
@@ -159,26 +154,22 @@ impl Graph {
 
             match last {
                 &ir::Instruction::Jump(label) => {
-                    if self
-                        .labels
-                        .get(format!(".LABEL_{label}").as_str())
-                        .is_some()
-                    {
-                        succs.push(format!(".LABEL_{label}"))
+                    if self.labels.get(format!("{label}").as_str()).is_some() {
+                        succs.push(format!("{label}"))
                     }
                 }
                 &ir::Instruction::Branch(.., then_label, else_label) => {
                     if self
                         .labels
-                        .get(format!(".LABEL_{then_label}").as_str())
+                        .get(format!("{then_label}").as_str())
                         .is_some()
                         && self
                             .labels
-                            .get(format!(".LABEL_{else_label}").as_str())
+                            .get(format!("{else_label}").as_str())
                             .is_some()
                     {
-                        succs.push(format!(".LABEL_{then_label}"));
-                        succs.push(format!(".LABEL_{else_label}"));
+                        succs.push(format!("{then_label}"));
+                        succs.push(format!("{else_label}"));
                     }
                 }
                 &ir::Instruction::Return(..) => succs = vec![],
@@ -240,8 +231,7 @@ mod tests {
                 let mut graph = Graph::new(irgen.functions());
                 graph.assign_labels_to_blocks();
                 // Compute successors.
-                graph.successors();
-                println!("======== CFG ========");
+                graph.compute_successors();
                 println!("{}", graph);
             }
         };

@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use crate::ir::{self, Instruction, OPCode};
+use crate::ir::{self};
 
 struct FunctionRewriter {}
 
@@ -103,7 +103,7 @@ impl DCE {
             }
         }
 
-        for mut inst in &mut worklist {
+        for inst in &mut worklist {
             if inst
                 .destination()
                 .is_some_and(|dst| !use_defs.contains(dst))
