@@ -1,4 +1,4 @@
-//! Implementation of a control flow graph for representing GIR programs.
+//! Implementation of control flow graphs over Glouton IR.
 use crate::ir;
 use crate::ir::{BasicBlock, BlockRef};
 use core::fmt;

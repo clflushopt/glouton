@@ -1665,4 +1665,14 @@ mod tests {
         "#,
         &vec![]
     );
+
+    test_ir_gen!(
+        can_canonicalize_constant_literals,
+        r#"
+            int main() {
+                return 1+1;
+            }
+        "#,
+        &vec![]
+    );
 }

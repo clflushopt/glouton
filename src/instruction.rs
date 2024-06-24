@@ -11,9 +11,6 @@
 //! `const` and `id` are core to the way the IR is structured as they allow us
 //! to easily translate into and out of SSA form; with potentially translating
 //! out of SSA can forgo the rename phase and just prune all the phi nodes.
-//!
-//! This is okay since we don't care for having debug informations (DWARF) or
-//! otherwise.
 use std::fmt;
 
 use crate::{ast, ast::Visitor, sema};
@@ -85,8 +82,8 @@ impl fmt::Display for Literal {
 /// as a virtual register than a symbol; also let's keep the virtual register
 /// number so that building things like use-defs becomes a set of `usize` vs
 /// a set of `String`.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-struct Symbol(String, Type);
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct Symbol(String, Type);
 
 impl Symbol {
     pub fn new(name: &str, t: Type) -> Self {
@@ -125,7 +122,7 @@ impl fmt::Display for Label {
 /// Every value in the intermediate representation is either a symbol reference
 /// to a storage location or a literal value.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Value {
+pub enum Value {
     StorageLocation(Symbol),
     ConstantLiteral(Literal),
 }
@@ -180,9 +177,9 @@ pub enum OPCode {
 
 /// Instructions in the intermediate representation are in three-address form.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Instruction {
+pub enum Instruction {
     // `const` operation.
-    Const(Symbol, Literal),
+    Const(Symbol, Value),
     // Instructions for arithmetic operations are in three address form
     // and wrap the storage location, left and right handside operands.
     Add(Symbol, Value, Value),
@@ -303,6 +300,70 @@ impl fmt::Display for Instruction {
 }
 
 impl Instruction {
+    /// Returns `true` if the instruction is considered a terminator.
+    pub fn terminator(&self) -> bool {
+        match self {
+            Self::Label(..)
+            | Self::Jump(..)
+            | Self::Branch(..)
+            | Self::Return(..) => true,
+            _ => false,
+        }
+    }
+
+    /// Returns the assignment destination of an IR instruction.
+    pub fn destination(&self) -> Option<&Symbol> {
+        match self {
+            Self::Id(dst, ..) => Some(dst),
+            Self::Const(dst, ..) => Some(dst),
+            Self::Add(dst, ..) => Some(dst),
+            Self::Sub(dst, ..) => Some(dst),
+            Self::Mul(dst, ..) => Some(dst),
+            Self::Div(dst, ..) => Some(dst),
+            Self::Eq(dst, ..) => Some(dst),
+            Self::Neq(dst, ..) => Some(dst),
+            Self::Lt(dst, ..) => Some(dst),
+            Self::Lte(dst, ..) => Some(dst),
+            Self::Gt(dst, ..) => Some(dst),
+            Self::Gte(dst, ..) => Some(dst),
+            Self::Branch(..) => None,
+            Self::Jump(..) => None,
+            Self::Return(..) => None,
+            Self::Label(..) => None,
+            _ => todo!("Todo {self}"),
+        }
+    }
+
+    /// Returns the operands of an IR instruction, our IR is in three-address
+    /// form so the operands will at most be two. The return value convention
+    /// will be left to right.
+    pub fn operands(&self) -> (Option<&Value>, Option<&Value>) {
+        match self {
+            Self::Id(.., operand) => (Some(operand), None),
+            Self::Const(.., operand) => (Some(operand), None),
+            Self::Add(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Sub(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Mul(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Div(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::And(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Or(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Neg(.., operand) => (Some(operand), None),
+            Self::Not(.., operand) => (Some(operand), None),
+            Self::Eq(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Neq(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Lt(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Lte(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Gt(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Gte(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Branch(operand, ..) => (Some(operand), None),
+            Self::Jump(..) => (None, None),
+            Self::Label(..) => (None, None),
+            Self::Return(operand) => (Some(operand), None),
+            _ => todo!("{self}"),
+        }
+    }
+
+    /// Returns the instruction opcode as `OPCode`.
     pub fn opcode(&self) -> OPCode {
         match self {
             Instruction::Const(..) => OPCode::Const,
@@ -349,7 +410,7 @@ pub struct Function {
     // List of arguments the function accepts.
     args: Vec<Symbol>,
     // Body of the function as GIR instructions.
-    body: Vec<Instruction>,
+    pub body: Vec<Instruction>,
     // Return type of the function if any.
     return_type: Type,
 }
@@ -364,8 +425,19 @@ impl Function {
         }
     }
 
+    /// Push an instruction to the function's body.
     fn push(&mut self, inst: &Instruction) {
         self.body.push(inst.clone())
+    }
+
+    /// Returns a non-mutable slice of the function's body.
+    pub fn instructions(&mut self) -> &[Instruction] {
+        &self.body
+    }
+
+    /// Returns a mutable slice of the function's body.
+    pub fn instructions_mut(&mut self) -> &mut [Instruction] {
+        self.body.as_mut()
     }
 }
 
@@ -527,6 +599,11 @@ impl<'a> IRBuilder<'a> {
     /// Returns a non-mutable reference to the program functions.
     pub const fn functions(&self) -> &Vec<Function> {
         &self.program
+    }
+
+    /// Returns a mutable reference to the program functions.
+    pub fn functions_mut(&mut self) -> &mut [Function] {
+        &mut self.program
     }
 
     pub fn gen(&mut self) {
@@ -902,7 +979,10 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                     format!("%v{}", self.llc.next_location()).as_str(),
                     Type::Int,
                 );
-                code.push(Instruction::Const(dst.clone(), Literal::Int(value)));
+                code.push(Instruction::Const(
+                    dst.clone(),
+                    Value::ConstantLiteral(Literal::Int(value)),
+                ));
                 (Some(Value::StorageLocation(dst)), code)
             }
             ast::Expr::BoolLiteral(value) => {
@@ -913,7 +993,7 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                 );
                 code.push(Instruction::Const(
                     dst.clone(),
-                    Literal::Bool(value),
+                    Value::ConstantLiteral(Literal::Bool(value)),
                 ));
                 (Some(Value::StorageLocation(dst)), code)
             }
@@ -925,7 +1005,7 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                 );
                 code.push(Instruction::Const(
                     dst.clone(),
-                    Literal::Char(value),
+                    Value::ConstantLiteral(Literal::Char(value)),
                 ));
                 (Some(Value::StorageLocation(dst)), code)
             }

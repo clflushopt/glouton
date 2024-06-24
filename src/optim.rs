@@ -1,14 +1,16 @@
 //! This module implements multiple transforms on the glouton IR
 //! mostly focused on scalar optimizations.
 
-use std::{collections::HashSet, ops::Add};
+use std::collections::HashSet;
 
+use crate::instruction;
+use crate::instruction::Symbol;
 use crate::ir::{self, Instruction, OPCode};
 
 struct FunctionRewriter {}
 
 impl FunctionRewriter {
-    fn rewrite(f: &mut ir::Function, transform: &impl Transform) {
+    fn rewrite(f: &mut instruction::Function, transform: &impl Transform) {
         transform.run(f)
     }
 }
@@ -16,7 +18,7 @@ impl FunctionRewriter {
 /// `Transform` trait is used to encapsulate the behavior of independant
 /// optimizations executed on individual functions.
 pub trait Transform {
-    fn run(&self, function: &mut ir::Function) {}
+    fn run(&self, function: &mut instruction::Function) {}
 }
 
 /// Identity transform implements the `Transform` interface but actually
@@ -25,13 +27,13 @@ pub trait Transform {
 struct Identity {}
 
 impl Transform for Identity {
-    fn run(&self, function: &mut ir::Function) {
+    fn run(&self, function: &mut instruction::Function) {
         // Get a list of basic blocks.
-        let bbs = function.form_basic_blocks();
+        // let bbs = function.form_basic_blocks();
 
-        for bb in bbs {
-            println!("{}", bb)
-        }
+        // for bb in bbs {
+        //     println!("{}", bb)
+        // }
     }
 }
 
@@ -69,26 +71,46 @@ struct DCE {}
 impl DCE {
     /// Trivial Global DCE pass on a function returns `true` if any instructions
     /// are eliminated.
-    pub fn tdce(function: &mut ir::Function) -> bool {
-        let mut worklist = function.instructions_mut_vec().clone();
+    pub fn tdce(function: &mut instruction::Function) -> bool {
+        let mut worklist = function.instructions_mut().to_vec();
         let candidates = worklist.len();
         let mut use_defs = HashSet::new();
 
         for inst in &worklist {
             // Check for instruction uses, if an instruction is uses defs
             // we remove them from the `defs` set.
-            match inst.args() {
-                Some(args) => args.iter().for_each(|arg| {
-                    use_defs.insert(arg.clone());
-                }),
+            match inst.operands() {
+                (Some(lhs), Some(rhs)) => {
+                    match (lhs, rhs) {
+                        (
+                            instruction::Value::StorageLocation(lhs),
+                            instruction::Value::StorageLocation(rhs),
+                        ) => {
+                            use_defs.insert(lhs.clone());
+                            use_defs.insert(rhs.clone());
+                        }
+                        // The only instructions that receive a constant literal
+                        // as a value as a literal is `const` and it only has
+                        // one operand.
+                        _ => (),
+                    }
+                }
+                (Some(operand), None) => match operand {
+                    instruction::Value::StorageLocation(operand) => {
+                        use_defs.insert(operand.clone());
+                    }
+                    _ => (),
+                },
                 _ => (),
             }
         }
 
-        for inst in &mut worklist {
-            if inst.dst().is_some_and(|dst| !use_defs.contains(dst)) {
-                println!("Dropping {}", inst);
-                let _ = std::mem::replace(inst, Instruction::nop());
+        for mut inst in &mut worklist {
+            if inst
+                .destination()
+                .is_some_and(|dst| !use_defs.contains(dst))
+            {
+                let _ = std::mem::replace(inst, instruction::Instruction::Nop);
             }
         }
 
@@ -98,7 +120,7 @@ impl DCE {
         // body.
         worklist
             .into_iter()
-            .filter(|inst| inst.opcode() != OPCode::Nop)
+            .filter(|inst| inst.opcode() != instruction::OPCode::Nop)
             .collect::<Vec<_>>()
             .clone_into(&mut function.body);
 
@@ -110,7 +132,7 @@ impl Transform for DCE {
     /// Run dead code elimination over a function repeatedly until all
     /// convergence. The pass convergences when the number of candidates
     /// for elimination reaches 0.
-    fn run(&self, function: &mut ir::Function) {
+    fn run(&self, function: &mut instruction::Function) {
         while Self::tdce(function) {}
     }
 }
@@ -129,7 +151,7 @@ impl Transform for LoopInvariantCodeMotion {}
 
 #[cfg(test)]
 mod tests {
-    use crate::ir::IRBuilder;
+    use crate::instruction::IRBuilder;
     use crate::optim::{Identity, Transform, DCE};
     use crate::parser::Parser;
     use crate::scanner::Scanner;
@@ -176,7 +198,12 @@ mod tests {
                 return 42;
             }
         "#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 42
+   ret %v0
+}
+"#
     );
 
     test_optimization_pass!(
@@ -190,7 +217,16 @@ mod tests {
                 return d;
             }
         "#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 4
+   a: int = id %v0
+   %v1: int = const 2
+   b: int = id %v1
+   %v3: int = add a b
+   d: int = id %v3
+   ret d
+}"#
     );
 
     test_optimization_pass!(
@@ -198,17 +234,20 @@ mod tests {
         r#"
             int main() {
                 int a = 42;
-                if (a > 43) {
-                    int b = 313;
-                    int c = 212;
-                    int d = 111;
-                    int e = 414;
-                    int f = 515;
-                    int g = 616;
-                }
+                int b = 313;
+                int c = 212;
+                int d = 111;
+                int e = 414;
+                int f = 515;
+                int g = 616;
                 return a;
             }
         "#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 42
+   a: int = id %v0
+   ret a
+}"#
     );
 }
