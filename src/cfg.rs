@@ -1,4 +1,4 @@
-//! Implementation of a control flow graph for representing GIR programs.
+//! Implementation of control flow graphs over Glouton IR.
 use crate::ir;
 use crate::ir::{BasicBlock, BlockRef};
 use core::fmt;
@@ -86,8 +86,8 @@ impl Graph {
     pub fn new(program: &Vec<ir::Function>) -> Self {
         let mut blocks: Vec<BasicBlock> = Vec::new();
 
-        for function in program {
-            let mut bbs = function.form_basic_blocks();
+        for mut function in program {
+            let mut bbs = Self::form_basic_blocks(function);
             blocks.append(&mut bbs)
         }
 
@@ -99,17 +99,49 @@ impl Graph {
         }
     }
 
+    /// Form a list of basic blocks from the function, the ownership of
+    /// the returned `Vec` is transferred to the caller.
+    pub fn form_basic_blocks(function: &ir::Function) -> Vec<BasicBlock> {
+        let mut blocks = Vec::new();
+        let mut current = BasicBlock::new();
+        for inst in function.instructions() {
+            if inst.label() {
+                if !current.instructions().is_empty() {
+                    blocks.push(current)
+                }
+                match inst {
+                    ir::Instruction::Label { .. } => {
+                        current = BasicBlock::new();
+                        current.push(inst);
+                    }
+                    _ => unreachable!(),
+                }
+            } else {
+                current.push(inst);
+                if inst.terminator() {
+                    blocks.push(current);
+                    current = BasicBlock::new();
+                }
+            }
+        }
+        blocks
+    }
+
     /// Iterate over all the constructed basic blocks and assign them a label
     /// if they don't have one. Blocks that are control flow target will always
     /// have a label instruction as a leader.
     fn assign_labels_to_blocks(&mut self) {
         for (index, block) in self.blocks.iter().enumerate() {
-            if block.leader().is_some_and(|inst| inst.is_label()) {
-                if let ir::Instruction::Label { ref name } = block.leader().unwrap() {
-                    self.labels.insert(name.clone(), ir::BlockRef(index));
+            if block.leader().is_some_and(|inst| inst.label()) {
+                if let ir::Instruction::Label(offset) = block.leader().unwrap()
+                {
+                    self.labels.insert(
+                        format!(".LABEL_{offset}"),
+                        ir::BlockRef(index),
+                    );
                 }
             } else {
-                let label = format!("_LABEL_AUTO_{}", index);
+                let label = format!(".LABEL_{}", index);
                 self.labels.insert(label, ir::BlockRef(index));
             }
         }
@@ -126,17 +158,30 @@ impl Graph {
                 .expect("Expected instruction found empty basic block");
 
             match last {
-                ir::Instruction::Effect { args, .. } => match last.opcode() {
-                    ir::OPCode::Jump | ir::OPCode::Branch => {
-                        for arg in args {
-                            if self.labels.get(arg).is_some() {
-                                succs.push(arg.clone())
-                            }
-                        }
+                &ir::Instruction::Jump(label) => {
+                    if self
+                        .labels
+                        .get(format!(".LABEL_{label}").as_str())
+                        .is_some()
+                    {
+                        succs.push(format!(".LABEL_{label}"))
                     }
-                    ir::OPCode::Return => succs = vec![],
-                    _ => (),
-                },
+                }
+                &ir::Instruction::Branch(.., then_label, else_label) => {
+                    if self
+                        .labels
+                        .get(format!(".LABEL_{then_label}").as_str())
+                        .is_some()
+                        && self
+                            .labels
+                            .get(format!(".LABEL_{else_label}").as_str())
+                            .is_some()
+                    {
+                        succs.push(format!(".LABEL_{then_label}"));
+                        succs.push(format!(".LABEL_{else_label}"));
+                    }
+                }
+                &ir::Instruction::Return(..) => succs = vec![],
                 _ => {
                     if block_ref.0 == self.labels.len() - 1 {
                         succs = vec![]
@@ -148,7 +193,10 @@ impl Graph {
                                 if v == BlockRef(block_ref.0 + 1) {
                                     k.clone()
                                 } else {
-                                    unreachable!("No label found for block {}", block_ref.0 + 1)
+                                    unreachable!(
+                                        "No label found for block {}",
+                                        block_ref.0 + 1
+                                    )
                                 }
                             })
                             .next()
@@ -189,26 +237,10 @@ mod tests {
 
                 let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
                 irgen.gen();
-                println!("======== FUNCTIONS ========");
-                println!("{:?}", irgen.functions());
-                println!("======== GLOBALS ========");
-                println!("{:?}", irgen.globals());
-                println!("========  END  ========");
-
                 let mut graph = Graph::new(irgen.functions());
                 graph.assign_labels_to_blocks();
                 // Compute successors.
                 graph.successors();
-                for (label, succs) in &graph.successors {
-                    println!("Label {} | Successors {:?}", label, succs)
-                }
-
-                for (name, block_ref) in &graph.labels {
-                    let block = &graph.blocks[block_ref.0];
-                    for inst in block.instructions() {
-                        println!("{}", inst);
-                    }
-                }
                 println!("======== CFG ========");
                 println!("{}", graph);
             }

@@ -224,6 +224,9 @@ pub enum BinaryOperator {
     Gte,
     Lt,
     Lte,
+    // Logical operators.
+    And,
+    Or,
 }
 
 impl fmt::Display for BinaryOperator {
@@ -239,6 +242,8 @@ impl fmt::Display for BinaryOperator {
             Self::Gte => write!(f, "GTE"),
             Self::Lt => write!(f, "LT"),
             Self::Lte => write!(f, "LTE"),
+            Self::And => write!(f, "AND"),
+            Self::Or => write!(f, "OR"),
         }
     }
 }
@@ -523,13 +528,19 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
             &Expr::IntLiteral(value) => value.to_string(),
             &Expr::BoolLiteral(value) => value.to_string(),
             &Expr::CharLiteral(value) => value.to_string(),
-            &Expr::UnaryOp { operator, operand } => self.ast.get_expr(operand).map_or_else(
-                || unreachable!("unary node is missing operand"),
-                |operand| match operator {
-                    UnaryOperator::Neg => format!("Neg({})", self.visit_expr(operand)),
-                    UnaryOperator::Not => format!("Not({})", self.visit_expr(operand)),
-                },
-            ),
+            &Expr::UnaryOp { operator, operand } => {
+                self.ast.get_expr(operand).map_or_else(
+                    || unreachable!("unary node is missing operand"),
+                    |operand| match operator {
+                        UnaryOperator::Neg => {
+                            format!("Neg({})", self.visit_expr(operand))
+                        }
+                        UnaryOperator::Not => {
+                            format!("Not({})", self.visit_expr(operand))
+                        }
+                    },
+                )
+            }
             &Expr::BinOp {
                 left,
                 operator,
@@ -540,16 +551,32 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 {
                     match operator {
                         BinaryOperator::Add => {
-                            format!("Add({}, {})", self.visit_expr(left), self.visit_expr(right))
+                            format!(
+                                "Add({}, {})",
+                                self.visit_expr(left),
+                                self.visit_expr(right)
+                            )
                         }
                         BinaryOperator::Sub => {
-                            format!("Sub({}, {})", self.visit_expr(left), self.visit_expr(right))
+                            format!(
+                                "Sub({}, {})",
+                                self.visit_expr(left),
+                                self.visit_expr(right)
+                            )
                         }
                         BinaryOperator::Mul => {
-                            format!("Mul({}, {})", self.visit_expr(left), self.visit_expr(right))
+                            format!(
+                                "Mul({}, {})",
+                                self.visit_expr(left),
+                                self.visit_expr(right)
+                            )
                         }
                         BinaryOperator::Div => {
-                            format!("Div({}, {})", self.visit_expr(left), self.visit_expr(right))
+                            format!(
+                                "Div({}, {})",
+                                self.visit_expr(left),
+                                self.visit_expr(right)
+                            )
                         }
                         BinaryOperator::Eq => {
                             format!(
@@ -593,15 +620,31 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                                 self.visit_expr(right)
                             )
                         }
+                        BinaryOperator::And => {
+                            format!(
+                                "And({}, {})",
+                                self.visit_expr(left),
+                                self.visit_expr(right)
+                            )
+                        }
+                        BinaryOperator::Or => {
+                            format!(
+                                "Or({}, {})",
+                                self.visit_expr(left),
+                                self.visit_expr(right)
+                            )
+                        }
                     }
                 } else {
                     unreachable!("binary node is missing operand")
                 }
             }
-            &Expr::Grouping(expr_ref) => self.ast.get_expr(expr_ref).map_or_else(
-                || unreachable!("unary node is missing operand"),
-                |expr| format!("Grouping({})", self.visit_expr(expr)),
-            ),
+            &Expr::Grouping(expr_ref) => {
+                self.ast.get_expr(expr_ref).map_or_else(
+                    || unreachable!("unary node is missing operand"),
+                    |expr| format!("Grouping({})", self.visit_expr(expr)),
+                )
+            }
             Expr::Named(ref name) => {
                 format!("Named({name})")
             }
@@ -610,7 +653,8 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 args,
             } => {
                 if let Some(name) = self.ast.get_expr(*name_ref) {
-                    let mut call_str = format!("Call({}, Args(", self.visit_expr(name));
+                    let mut call_str =
+                        format!("Call({}, Args(", self.visit_expr(name));
                     for arg_ref in args.iter() {
                         if let Some(arg) = self.ast.get_expr(*arg_ref) {
                             let formatted_arg = self.visit_expr(arg);
@@ -756,10 +800,10 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
 
                 args_str = args_str.trim_end_matches(", ").to_string();
 
-                let body = self
-                    .ast
-                    .get_stmt(*body)
-                    .map_or_else(|| unreachable!("function is missing body"), |body| body);
+                let body = self.ast.get_stmt(*body).map_or_else(
+                    || unreachable!("function is missing body"),
+                    |body| body,
+                );
                 format!(
                     "FUNCTION({}, {}, ARGS({}), {}",
                     name,

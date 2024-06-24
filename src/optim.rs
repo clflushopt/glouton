@@ -27,11 +27,11 @@ struct Identity {}
 impl Transform for Identity {
     fn run(&self, function: &mut ir::Function) {
         // Get a list of basic blocks.
-        let bbs = function.form_basic_blocks();
+        // let bbs = function.form_basic_blocks();
 
-        for bb in bbs {
-            println!("{}", bb)
-        }
+        // for bb in bbs {
+        //     println!("{}", bb)
+        // }
     }
 }
 
@@ -47,9 +47,9 @@ impl Transform for InstCombine {}
 /// to their usage locations.
 struct ConstantFold {}
 
-impl Transform for ConstantFold {
-    fn run(&self, function: &mut ir::Function) {}
-}
+impl ConstantFold {}
+
+impl Transform for ConstantFold {}
 
 /// Common subexpression elimination pass replaces common subexpressions in
 /// a basic block by their previously computed values. The pass will in most
@@ -70,25 +70,45 @@ impl DCE {
     /// Trivial Global DCE pass on a function returns `true` if any instructions
     /// are eliminated.
     pub fn tdce(function: &mut ir::Function) -> bool {
-        let mut worklist = function.instructions_mut_vec().clone();
+        let mut worklist = function.instructions_mut().to_vec();
         let candidates = worklist.len();
         let mut use_defs = HashSet::new();
 
         for inst in &worklist {
             // Check for instruction uses, if an instruction is uses defs
             // we remove them from the `defs` set.
-            match inst.args() {
-                Some(args) => args.iter().for_each(|arg| {
-                    use_defs.insert(arg.clone());
-                }),
+            match inst.operands() {
+                (Some(lhs), Some(rhs)) => {
+                    match (lhs, rhs) {
+                        (
+                            ir::Value::StorageLocation(lhs),
+                            ir::Value::StorageLocation(rhs),
+                        ) => {
+                            use_defs.insert(lhs.clone());
+                            use_defs.insert(rhs.clone());
+                        }
+                        // The only instructions that receive a constant literal
+                        // as a value as a literal is `const` and it only has
+                        // one operand.
+                        _ => (),
+                    }
+                }
+                (Some(operand), None) => match operand {
+                    ir::Value::StorageLocation(operand) => {
+                        use_defs.insert(operand.clone());
+                    }
+                    _ => (),
+                },
                 _ => (),
             }
         }
 
-        for inst in &mut worklist {
-            if inst.dst().is_some_and(|dst| !use_defs.contains(dst)) {
-                println!("Dropping {}", inst);
-                let _ = std::mem::replace(inst, Instruction::nop());
+        for mut inst in &mut worklist {
+            if inst
+                .destination()
+                .is_some_and(|dst| !use_defs.contains(dst))
+            {
+                let _ = std::mem::replace(inst, ir::Instruction::Nop);
             }
         }
 
@@ -98,7 +118,7 @@ impl DCE {
         // body.
         worklist
             .into_iter()
-            .filter(|inst| inst.opcode() != OPCode::Nop)
+            .filter(|inst| inst.opcode() != ir::OPCode::Nop)
             .collect::<Vec<_>>()
             .clone_into(&mut function.body);
 
@@ -155,14 +175,14 @@ mod tests {
                 let ident = Identity {};
                 let dce = DCE {};
 
-                for mut func in irgen.functions_mut() {
+                for func in irgen.functions_mut() {
                     println!("Pre-Pass function: {}", func);
                 }
                 for func in irgen.functions_mut() {
                     ident.run(func);
                     dce.run(func);
                 }
-                for mut func in irgen.functions_mut() {
+                for func in irgen.functions_mut() {
                     println!("Post-Pass function: {}", func);
                 }
             }
@@ -176,7 +196,12 @@ mod tests {
                 return 42;
             }
         "#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 42
+   ret %v0
+}
+"#
     );
 
     test_optimization_pass!(
@@ -190,7 +215,16 @@ mod tests {
                 return d;
             }
         "#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 4
+   a: int = id %v0
+   %v1: int = const 2
+   b: int = id %v1
+   %v3: int = add a b
+   d: int = id %v3
+   ret d
+}"#
     );
 
     test_optimization_pass!(
@@ -198,17 +232,20 @@ mod tests {
         r#"
             int main() {
                 int a = 42;
-                if (a > 43) {
-                    int b = 313;
-                    int c = 212;
-                    int d = 111;
-                    int e = 414;
-                    int f = 515;
-                    int g = 616;
-                }
+                int b = 313;
+                int c = 212;
+                int d = 111;
+                int e = 414;
+                int f = 515;
+                int g = 616;
                 return a;
             }
         "#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 42
+   a: int = id %v0
+   ret a
+}"#
     );
 }

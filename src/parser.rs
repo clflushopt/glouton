@@ -1,7 +1,8 @@
 //! Parser for a subset of C0 language that uses Pratt's approach to parsing
 //! expressions and a flat representation for the AST.
 use crate::ast::{
-    BinaryOperator, Decl, DeclType, Expr, ExprRef, Stmt, StmtRef, UnaryOperator, AST,
+    BinaryOperator, Decl, DeclType, Expr, ExprRef, Stmt, StmtRef,
+    UnaryOperator, AST,
 };
 use crate::token::Token;
 
@@ -45,7 +46,9 @@ impl From<u8> for Precedence {
             7 => Self::Factor,
             8 => Self::Unary,
             9 => Self::Call,
-            _ => unreachable!("Unexpected `from({prec})` no matching variant for {prec}"),
+            _ => unreachable!(
+                "Unexpected `from({prec})` no matching variant for {prec}"
+            ),
         }
     }
 }
@@ -110,7 +113,9 @@ impl Parser {
             Token::Int => DeclType::Int,
             Token::Char => DeclType::Char,
             Token::Bool => DeclType::Bool,
-            _ => unreachable!("Expected declaration type to be one of (int, char, bool)."),
+            _ => unreachable!(
+                "Expected declaration type to be one of (int, char, bool)."
+            ),
         };
         let identifier = match self.advance() {
             Token::Identifier(ident) => ident.clone(),
@@ -221,12 +226,17 @@ impl Parser {
                     Token::Int => DeclType::Int,
                     Token::Char => DeclType::Char,
                     Token::Bool => DeclType::Bool,
-                    _ => unreachable!("expected type declaration found {}", self.peek()),
+                    _ => unreachable!(
+                        "expected type declaration found {}",
+                        self.peek()
+                    ),
                 };
 
                 let arg_name = match self.advance() {
                     Token::Identifier(name) => name.clone(),
-                    _ => unreachable!("expected identifier got {}", self.peek()),
+                    _ => {
+                        unreachable!("expected identifier got {}", self.peek())
+                    }
                 };
 
                 let arg = Stmt::FuncArg {
@@ -389,9 +399,12 @@ impl Parser {
         while prec < Self::get_token_precedence(self.peek()) {
             let infix_ref = match self.advance() {
                 // Arithmetic expressions.
-                &Token::Plus | &Token::Minus | &Token::Star | &Token::Slash => {
-                    self.binary(prefix_ref)
-                }
+                &Token::Plus
+                | &Token::Minus
+                | &Token::Star
+                | &Token::Slash
+                | &Token::And
+                | &Token::Or => self.binary(prefix_ref),
                 // Comparison expressions.
                 &Token::EqualEqual
                 | &Token::BangEqual
@@ -422,10 +435,14 @@ impl Parser {
             Token::EqualEqual => BinaryOperator::Eq,
             Token::BangEqual => BinaryOperator::Neq,
             // There is no infix operator.
-            _ => unreachable!("Unknown token in binary expression {}", self.peek()),
+            _ => unreachable!(
+                "Unknown token in binary expression {}",
+                self.peek()
+            ),
         };
 
-        let precedence = (Self::get_token_precedence(self.prev()) as u8 + 1).into();
+        let precedence =
+            (Self::get_token_precedence(self.prev()) as u8 + 1).into();
         let right = self.by_precedence(precedence);
         self.ast.push_expr(Expr::BinOp {
             left,
@@ -441,8 +458,13 @@ impl Parser {
             Token::Minus => BinaryOperator::Sub,
             Token::Star => BinaryOperator::Mul,
             Token::Slash => BinaryOperator::Div,
+            Token::And => BinaryOperator::And,
+            Token::Or => BinaryOperator::Or,
             // There is no infix operator.
-            _ => unreachable!("Unknown token in binary expression {}", self.peek()),
+            _ => unreachable!(
+                "Unknown token in binary expression {}",
+                self.peek()
+            ),
         };
         let precedence = Self::get_token_precedence(self.prev());
         let right = self.by_precedence(precedence);
@@ -492,7 +514,9 @@ impl Parser {
     fn named(&mut self) -> ExprRef {
         // Consume the token and build a named expr.
         match self.prev() {
-            Token::Identifier(ident) => self.ast.push_expr(Expr::Named(ident.to_string())),
+            Token::Identifier(ident) => {
+                self.ast.push_expr(Expr::Named(ident.to_string()))
+            }
             _ => unreachable!(
                 "Expected identifier in named expression got {}",
                 self.prev()
@@ -537,9 +561,10 @@ impl Parser {
             Token::Or => Precedence::Or,
             Token::And => Precedence::And,
             Token::EqualEqual | Token::BangEqual => Precedence::Equal,
-            Token::Greater | Token::GreaterEqual | Token::Lesser | Token::LesserEqual => {
-                Precedence::Comparison
-            }
+            Token::Greater
+            | Token::GreaterEqual
+            | Token::Lesser
+            | Token::LesserEqual => Precedence::Comparison,
             // Assignment.
             Token::Equal => Precedence::Assignment,
             // Call.
@@ -617,7 +642,6 @@ mod tests {
                     .expect("Expected source code for test case to be valid !");
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
-                println!("AST: {}", parser.ast());
                 assert!(parser.ast().to_string().contains($expected));
             }
         };
@@ -867,5 +891,26 @@ Stmt(Expr(Assign(Named(i), Add(Named(i), 1)))),
         "FOR(INIT(Assign(Named(i), 1)), COND(), ITER(Assign(Named(i), Add(Named(i), 1))), Block {
 Stmt(Expr(Assign(Named(i), Add(Named(i), 1)))),
 })"
+    );
+
+    test_parser!(
+        can_parse_and_expressions,
+        r#"int main() { 
+        bool a = true;
+        bool b = true;
+
+        if (a && b) {
+            return 0;
+        }
+        return 1;
+         }"#,
+        "FUNCTION(main, INT_TYPE, ARGS(), Block {
+Stmt(VAR(BOOL_TYPE, a, true)),
+Stmt(VAR(BOOL_TYPE, b, true)),
+Stmt(IF(And(Named(a), Named(b)), Block {
+Stmt(Return(0)),
+})),
+Stmt(Return(1)),
+}"
     );
 }
