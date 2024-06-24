@@ -3,14 +3,12 @@
 
 use std::collections::HashSet;
 
-use crate::instruction;
-use crate::instruction::Symbol;
 use crate::ir::{self, Instruction, OPCode};
 
 struct FunctionRewriter {}
 
 impl FunctionRewriter {
-    fn rewrite(f: &mut instruction::Function, transform: &impl Transform) {
+    fn rewrite(f: &mut ir::Function, transform: &impl Transform) {
         transform.run(f)
     }
 }
@@ -18,7 +16,7 @@ impl FunctionRewriter {
 /// `Transform` trait is used to encapsulate the behavior of independant
 /// optimizations executed on individual functions.
 pub trait Transform {
-    fn run(&self, function: &mut instruction::Function) {}
+    fn run(&self, function: &mut ir::Function) {}
 }
 
 /// Identity transform implements the `Transform` interface but actually
@@ -27,7 +25,7 @@ pub trait Transform {
 struct Identity {}
 
 impl Transform for Identity {
-    fn run(&self, function: &mut instruction::Function) {
+    fn run(&self, function: &mut ir::Function) {
         // Get a list of basic blocks.
         // let bbs = function.form_basic_blocks();
 
@@ -71,7 +69,7 @@ struct DCE {}
 impl DCE {
     /// Trivial Global DCE pass on a function returns `true` if any instructions
     /// are eliminated.
-    pub fn tdce(function: &mut instruction::Function) -> bool {
+    pub fn tdce(function: &mut ir::Function) -> bool {
         let mut worklist = function.instructions_mut().to_vec();
         let candidates = worklist.len();
         let mut use_defs = HashSet::new();
@@ -83,8 +81,8 @@ impl DCE {
                 (Some(lhs), Some(rhs)) => {
                     match (lhs, rhs) {
                         (
-                            instruction::Value::StorageLocation(lhs),
-                            instruction::Value::StorageLocation(rhs),
+                            ir::Value::StorageLocation(lhs),
+                            ir::Value::StorageLocation(rhs),
                         ) => {
                             use_defs.insert(lhs.clone());
                             use_defs.insert(rhs.clone());
@@ -96,7 +94,7 @@ impl DCE {
                     }
                 }
                 (Some(operand), None) => match operand {
-                    instruction::Value::StorageLocation(operand) => {
+                    ir::Value::StorageLocation(operand) => {
                         use_defs.insert(operand.clone());
                     }
                     _ => (),
@@ -110,7 +108,7 @@ impl DCE {
                 .destination()
                 .is_some_and(|dst| !use_defs.contains(dst))
             {
-                let _ = std::mem::replace(inst, instruction::Instruction::Nop);
+                let _ = std::mem::replace(inst, ir::Instruction::Nop);
             }
         }
 
@@ -120,7 +118,7 @@ impl DCE {
         // body.
         worklist
             .into_iter()
-            .filter(|inst| inst.opcode() != instruction::OPCode::Nop)
+            .filter(|inst| inst.opcode() != ir::OPCode::Nop)
             .collect::<Vec<_>>()
             .clone_into(&mut function.body);
 
@@ -132,7 +130,7 @@ impl Transform for DCE {
     /// Run dead code elimination over a function repeatedly until all
     /// convergence. The pass convergences when the number of candidates
     /// for elimination reaches 0.
-    fn run(&self, function: &mut instruction::Function) {
+    fn run(&self, function: &mut ir::Function) {
         while Self::tdce(function) {}
     }
 }
@@ -151,7 +149,7 @@ impl Transform for LoopInvariantCodeMotion {}
 
 #[cfg(test)]
 mod tests {
-    use crate::instruction::IRBuilder;
+    use crate::ir::IRBuilder;
     use crate::optim::{Identity, Transform, DCE};
     use crate::parser::Parser;
     use crate::scanner::Scanner;

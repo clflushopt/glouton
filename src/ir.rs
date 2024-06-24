@@ -1,16 +1,19 @@
-//! Intermediate representation definition and implementation.
+//! The glouton intermediate representation is a three-address code linear IR
+//! used to represent Glouton programs.
 //!
-//! Glouton Intermediate Representation is a linear SSA oriented intermediate
-//! representation. The intermediate representation is based on Bril and
-//! has three core instruction types, constant operations which produce
-//! constant values, value operations which take operands and produce values
-//! and effect based operations which take operands and produce no values.
-use std::fmt::{self};
+//! This iteration of the implementation improves significantly on the initial
+//! design; with the actual instruction semantics remaining unchanged.
+//!
+//! `const` instruction exists to encode all literal values into a temporary
+//! storage location (virtual registers) and the `id` instruction similarly
+//! assigns named values to new temporaries.
+//!
+//! `const` and `id` are core to the way the IR is structured as they allow us
+//! to easily translate into and out of SSA form; with potentially translating
+//! out of SSA can forgo the rename phase and just prune all the phi nodes.
+use std::fmt;
 
-use crate::{
-    ast::{self, Visitor},
-    sema::{self, SymbolTable},
-};
+use crate::{ast, ast::Visitor, sema};
 
 /// Types used in the IR.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -26,17 +29,6 @@ pub enum Type {
     Char,
 }
 
-impl fmt::Display for Type {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unit => write!(f, ""),
-            Self::Int => write!(f, "int"),
-            Self::Bool => write!(f, "bool"),
-            Self::Char => write!(f, "char"),
-        }
-    }
-}
-
 impl Type {
     /// Returns an IR type from an AST declaration type.
     fn from(value: &ast::DeclType) -> Self {
@@ -44,6 +36,17 @@ impl Type {
             ast::DeclType::Int => Self::Int,
             ast::DeclType::Char => Self::Char,
             ast::DeclType::Bool => Self::Bool,
+        }
+    }
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unit => write!(f, ""),
+            Self::Int => write!(f, "int"),
+            Self::Bool => write!(f, "bool"),
+            Self::Char => write!(f, "char"),
         }
     }
 }
@@ -73,120 +76,68 @@ impl fmt::Display for Literal {
     }
 }
 
-/// ConstOp are opcodes for constant operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ConstOp {
-    /// `const` operation.
-    Const,
-}
+/// Symbols can represent variable or function names.
+///
+/// TODO: Potentially rename `Symbol` to storage location since it acts more
+/// as a virtual register than a symbol; also let's keep the virtual register
+/// number so that building things like use-defs becomes a set of `usize` vs
+/// a set of `String`.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct Symbol(String, Type);
 
-impl fmt::Display for ConstOp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Const => write!(f, "const"),
-        }
+impl Symbol {
+    pub fn new(name: &str, t: Type) -> Self {
+        Self(name.to_string(), t)
+    }
+
+    /// Returns a non-mutable reference to the symbol's name.
+    pub fn name(&self) -> &str {
+        &self.0
+    }
+
+    /// Returns the symbol's type.
+    pub fn t(&self) -> Type {
+        self.1
     }
 }
 
-/// EffectOp are opcodes for effect operations such as control flow operations
-/// (indirect jumps, conditional branches, calls...).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EffectOp {
-    // Indirect jumps.
-    Jump,
-    // Condtional branches.
-    Branch,
-    // Function calls that don't produce values.
-    Call,
-    // Return statements.
-    Return,
-}
-
-impl fmt::Display for EffectOp {
+impl fmt::Display for Symbol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Jump => write!(f, "jmp"),
-            Self::Branch => write!(f, "br"),
-            Self::Call => write!(f, "call"),
-            Self::Return => write!(f, "ret"),
-        }
+        write!(f, "{}: {}", self.0, self.1)
     }
 }
 
-/// ValueOp are opcodes for value operations, a value operation is any value
-/// producing operation. Such as arithemtic operations, comparison operations
-/// and loads or stores.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ValueOp {
-    // Arithmetic operators.
-    Add,
-    Sub,
-    Mul,
-    Div,
-    // Comparison operators.
-    Eq,
-    Neq,
-    Lt,
-    Gt,
-    Lte,
-    Gte,
-    // Unary operators.
-    Not,
-    Neg,
-    // Boolean operators.
-    And,
-    Or,
-    // Function calls that produce values.
-    Call,
-    // Identity operator.
-    Id,
-}
+/// Labels are used to designate branch targets in control flow operations.
+///
+/// Each label is a relative offset to the target branch first instruction.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Label(usize);
 
-impl fmt::Display for ValueOp {
+impl fmt::Display for Label {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Add => write!(f, "add"),
-            Self::Sub => write!(f, "sub"),
-            Self::Mul => write!(f, "mul"),
-            Self::Div => write!(f, "div"),
-            Self::Eq => write!(f, "eq"),
-            Self::Neq => write!(f, "neq"),
-            Self::Lt => write!(f, "lt"),
-            Self::Gt => write!(f, "gt"),
-            Self::Lte => write!(f, "lte"),
-            Self::Gte => write!(f, "gte"),
-            Self::Not => write!(f, "not"),
-            Self::Neg => write!(f, "neg"),
-            Self::And => write!(f, "and"),
-            Self::Or => write!(f, "or"),
-            Self::Call => write!(f, "call"),
-            Self::Id => write!(f, "id"),
-        }
+        write!(f, ".LABEL_{}", self.0)
     }
 }
 
-impl ValueOp {
-    /// Convert an AST operator node to an instruction.
-    fn from(operator: &ast::BinaryOperator) -> ValueOp {
-        match operator {
-            ast::BinaryOperator::Add => ValueOp::Add,
-            ast::BinaryOperator::Sub => ValueOp::Sub,
-            ast::BinaryOperator::Mul => ValueOp::Mul,
-            ast::BinaryOperator::Div => ValueOp::Div,
-            ast::BinaryOperator::Eq => ValueOp::Eq,
-            ast::BinaryOperator::Neq => ValueOp::Neq,
-            ast::BinaryOperator::Lt => ValueOp::Lt,
-            ast::BinaryOperator::Lte => ValueOp::Lte,
-            ast::BinaryOperator::Gt => ValueOp::Gt,
-            ast::BinaryOperator::Gte => ValueOp::Gte,
-            ast::BinaryOperator::And => ValueOp::And,
-            ast::BinaryOperator::Or => ValueOp::Or,
+/// Every value in the intermediate representation is either a symbol reference
+/// to a storage location or a literal value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Value {
+    StorageLocation(Symbol),
+    ConstantLiteral(Literal),
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::StorageLocation(symbol) => write!(f, "{}", symbol.0),
+            Self::ConstantLiteral(lit) => write!(f, "{lit}"),
         }
     }
 }
 
 /// OPCode is a type wrapper around all opcodes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum OPCode {
     // Indirect jumps.
     Jump,
@@ -218,322 +169,235 @@ pub enum OPCode {
     Or,
     // Identity operator.
     Id,
-    // Label instructions.
+    // Label pseudo instruction.
     Label,
     // Nop instruction.
     Nop,
 }
 
-/// Instructions in GIR are split into three groups, each group describe a set
-/// of behaviors that the instructions implement.
-///
-/// Each behavior set describe certain semantics, enumerated below :
-///
-/// * Constant Operations: produce constant values to a destination and have
-///   no side effects.
-///
-/// * Value Operations: produce dynamic values to a destination, consequently
-///   they have no side effects.
-///
-/// * Effect Operations: produce behavior such as redirecting control flow and
-///   thus have side effects.
-///
-/// `%a: int = const 5` for example is a constant operation that produces an
-/// integer value (5) to a target variable `%a`.
-///
-/// `br cond .label_1 .label_2` is an effect operation that produces no value
-/// but describes the behavior of a branch condition to either one of the two
-/// provided labels.
-///
-/// `%res = add %var1 %var2` is a value operaiton that produces the sum of two
-/// variables.
+/// Instructions in the intermediate representation are in three-address form.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {
-    // Nop instruction are instructions that produce no values or side effects.
+    // `const` operation.
+    Const(Symbol, Value),
+    // Instructions for arithmetic operations are in three address form
+    // and wrap the storage location, left and right handside operands.
+    Add(Symbol, Value, Value),
+    Sub(Symbol, Value, Value),
+    Mul(Symbol, Value, Value),
+    Div(Symbol, Value, Value),
+    // Logical operations, similar to arithmetic operations but for boolean
+    // values.
+    And(Symbol, Value, Value),
+    Or(Symbol, Value, Value),
+    // Unary operators.
+    Not(Symbol, Value),
+    Neg(Symbol, Value),
+    // Comparison operators.
+    Eq(Symbol, Value, Value),
+    Neq(Symbol, Value, Value),
+    Lt(Symbol, Value, Value),
+    Lte(Symbol, Value, Value),
+    Gt(Symbol, Value, Value),
+    Gte(Symbol, Value, Value),
+    // Return statements.
+    Return(Value),
+    // Function calls.
+    Call(
+        // Storage location for the function call result.
+        Symbol,
+        // Called function name.
+        Symbol,
+        // Function arguments.
+        Vec<Value>,
+    ),
+    // Direct jump to label.
+    Jump(Label),
+    // Condtional branches.
+    Branch(
+        // Conditional value.
+        Value,
+        // Label for the `then` branch.
+        Label,
+        // Label for the `else` branch.
+        Label,
+    ),
+    // Identity operator.
+    Id(Symbol, Value),
+    // Label pseudo instruction, acts as a data marker when generating code.
+    Label(usize),
+    // Nop instruction.
     Nop,
-    // Constant instructions are instructions that produce a single constant
-    // typed value to a destination variable.
-    Constant {
-        // Destination variable name.
-        dst: String,
-        // Opcode for the instruction, currently only `const`.
-        op: ConstOp,
-        // Type of the variable.
-        const_type: Type,
-        // Literal value stored.
-        value: Literal,
-    },
-
-    // Value instructions that produce a value from arguments where each opcode
-    // enforces the rules for the arguments.
-    Value {
-        // List of argument names (variable, function or label).
-        args: Vec<String>,
-        // Destination variable name.
-        dst: String,
-        // Opcode for the instruction.
-        op: ValueOp,
-        // Type of the variable.
-        op_type: Type,
-    },
-    // Effect instructions that incur a side effect.
-    Effect {
-        // List of argument names (variable, function or label).
-        args: Vec<String>,
-        // Opcode for the instruction.
-        op: EffectOp,
-    },
-    // Label instructions are unique, they have no effect of any kind and only
-    // serve to mark blocks in conditions, jumps and loops.
-    Label {
-        name: String,
-    },
 }
 
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Nop => write!(f, "NOP"),
-            Self::Constant {
-                dst,
-                op,
-                const_type,
-                value,
-            } => {
-                write!(f, "{dst}: {const_type} = {op} {value}")
+            Instruction::Const(dst, lit) => {
+                write!(f, "{}: {} = const {lit}", dst.0, dst.1)
             }
-            Self::Value {
-                args,
-                dst,
-                op,
-                op_type,
-            } => {
-                write!(f, "{dst}: {op_type} = {op} ")?;
+            Instruction::Add(dst, lhs, rhs) => {
+                write!(f, "{}: {} = add {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Sub(dst, lhs, rhs) => {
+                write!(f, "{}: {} = sub {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Mul(dst, lhs, rhs) => {
+                write!(f, "{}: {} = mul {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Div(dst, lhs, rhs) => {
+                write!(f, "{}: {} = div {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::And(dst, lhs, rhs) => {
+                write!(f, "{}: {} = and {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Or(dst, lhs, rhs) => {
+                write!(f, "{}: {} = or {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Neg(dst, operand) => {
+                write!(f, "{}: {} = neg {operand}", dst.0, dst.1)
+            }
+            Instruction::Not(dst, operand) => {
+                write!(f, "{}: {} = not {operand}", dst.0, dst.1)
+            }
+            Instruction::Eq(dst, lhs, rhs) => {
+                write!(f, "{}: {} = eq {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Neq(dst, lhs, rhs) => {
+                write!(f, "{}: {} = neq {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Lt(dst, lhs, rhs) => {
+                write!(f, "{}: {} = lt {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Lte(dst, lhs, rhs) => {
+                write!(f, "{}: {} = lte {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Gt(dst, lhs, rhs) => {
+                write!(f, "{}: {} = gt {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Gte(dst, lhs, rhs) => {
+                write!(f, "{}: {} = gte {lhs} {rhs}", dst.0, dst.1)
+            }
+            Instruction::Return(value) => write!(f, "ret {value}"),
+            Instruction::Call(dst, def, args) => {
+                write!(f, "{}: {} = call @{}", dst.0, dst.1, def.0)?;
                 for arg in args {
-                    match op {
-                        ValueOp::Call => write!(f, " @{arg} ")?,
-                        _ => write!(f, "{arg} ")?,
-                    }
+                    write!(f, " {arg}")?;
                 }
-                Ok(())
+                write!(f, "")
             }
-            Self::Effect { args, op } => {
-                write!(f, "{op} ")?;
-                for arg in args {
-                    match op {
-                        EffectOp::Jump => write!(f, "{arg}")?,
-                        EffectOp::Call => write!(f, "@{arg}")?,
-                        EffectOp::Branch => write!(f, "{arg} ")?,
-                        EffectOp::Return => write!(f, "{arg}")?,
-                    }
-                }
-                Ok(())
+            Instruction::Jump(target) => write!(f, "jmp {}", target),
+            Instruction::Branch(cond, then_target, else_target) => {
+                write!(f, "br {} {then_target} {else_target}", cond)
             }
-            Self::Label { name } => {
-                write!(f, "{name}")
+            Instruction::Id(dst, value) => {
+                write!(f, "{}: {} = id {value}", dst.0, dst.1)
             }
+            Instruction::Nop => write!(f, "nop"),
+            Instruction::Label(addr) => write!(f, ".LABEL_{addr}"),
         }
     }
 }
 
-/// Instruction emitters are all owning functions, they take ownership
-/// of their arguments to build an `Instruction`.
 impl Instruction {
     /// Returns `true` if the instruction is considered a terminator.
-    pub fn is_terminator(&self) -> bool {
-        match *self {
-            Self::Effect { op, .. } => match op {
-                EffectOp::Jump | EffectOp::Branch | EffectOp::Return => true,
-                EffectOp::Call => false,
-            },
-            Self::Label { .. } => true,
+    pub fn terminator(&self) -> bool {
+        match self {
+            Self::Label(..)
+            | Self::Jump(..)
+            | Self::Branch(..)
+            | Self::Return(..) => true,
             _ => false,
         }
     }
 
-    /// Returns `true` if the instruction is a label.
-    pub fn is_label(&self) -> bool {
-        matches!(self, &Self::Label { .. })
+    /// Returns `true` if the instruction is a label, which is a pseudo
+    /// instruction used to mark offsets in the instructions slice.
+    pub fn label(&self) -> bool {
+        match self {
+            Self::Label(..) => true,
+            _ => false,
+        }
     }
 
-    /// Return the instruction's opcode..
+    /// Returns the assignment destination of an IR instruction.
+    pub fn destination(&self) -> Option<&Symbol> {
+        match self {
+            Self::Id(dst, ..) => Some(dst),
+            Self::Const(dst, ..) => Some(dst),
+            Self::Add(dst, ..) => Some(dst),
+            Self::Sub(dst, ..) => Some(dst),
+            Self::Mul(dst, ..) => Some(dst),
+            Self::Div(dst, ..) => Some(dst),
+            Self::Eq(dst, ..) => Some(dst),
+            Self::Neq(dst, ..) => Some(dst),
+            Self::Lt(dst, ..) => Some(dst),
+            Self::Lte(dst, ..) => Some(dst),
+            Self::Gt(dst, ..) => Some(dst),
+            Self::Gte(dst, ..) => Some(dst),
+            Self::Branch(..) => None,
+            Self::Jump(..) => None,
+            Self::Return(..) => None,
+            Self::Label(..) => None,
+            _ => todo!("Todo {self}"),
+        }
+    }
+
+    /// Returns the operands of an IR instruction, our IR is in three-address
+    /// form so the operands will at most be two. The return value convention
+    /// will be left to right.
+    pub fn operands(&self) -> (Option<&Value>, Option<&Value>) {
+        match self {
+            Self::Id(.., operand) => (Some(operand), None),
+            Self::Const(.., operand) => (Some(operand), None),
+            Self::Add(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Sub(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Mul(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Div(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::And(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Or(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Neg(.., operand) => (Some(operand), None),
+            Self::Not(.., operand) => (Some(operand), None),
+            Self::Eq(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Neq(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Lt(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Lte(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Gt(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Gte(.., lhs, rhs) => (Some(lhs), Some(rhs)),
+            Self::Branch(operand, ..) => (Some(operand), None),
+            Self::Jump(..) => (None, None),
+            Self::Label(..) => (None, None),
+            Self::Return(operand) => (Some(operand), None),
+            _ => todo!("{self}"),
+        }
+    }
+
+    /// Returns the instruction opcode as `OPCode`.
     pub fn opcode(&self) -> OPCode {
         match self {
-            Self::Effect { op, .. } => match op {
-                EffectOp::Call => OPCode::Call,
-                EffectOp::Return => OPCode::Return,
-                EffectOp::Branch => OPCode::Branch,
-                EffectOp::Jump => OPCode::Jump,
-            },
-            Self::Value { op, .. } => match op {
-                ValueOp::Eq => OPCode::Eq,
-                ValueOp::Lt => OPCode::Lt,
-                ValueOp::Gt => OPCode::Gt,
-                ValueOp::Or => OPCode::Or,
-                ValueOp::Id => OPCode::Id,
-                ValueOp::Add => OPCode::Add,
-                ValueOp::Sub => OPCode::Sub,
-                ValueOp::Mul => OPCode::Mul,
-                ValueOp::Div => OPCode::Div,
-                ValueOp::Neq => OPCode::Neq,
-                ValueOp::Lte => OPCode::Lte,
-                ValueOp::Gte => OPCode::Gte,
-                ValueOp::Not => OPCode::Not,
-                ValueOp::Neg => OPCode::Neq,
-                ValueOp::And => OPCode::And,
-                ValueOp::Call => OPCode::Call,
-            },
-            Self::Nop => OPCode::Nop,
-            Self::Constant { .. } => OPCode::Const,
-            Self::Label { .. } => OPCode::Label,
+            Instruction::Const(..) => OPCode::Const,
+            Instruction::Add(..) => OPCode::Add,
+            Instruction::Sub(..) => OPCode::Sub,
+            Instruction::Mul(..) => OPCode::Mul,
+            Instruction::Div(..) => OPCode::Div,
+            Instruction::And(..) => OPCode::And,
+            Instruction::Or(..) => OPCode::Or,
+            Instruction::Neg(..) => OPCode::Neg,
+            Instruction::Not(..) => OPCode::Not,
+            Instruction::Eq(..) => OPCode::Eq,
+            Instruction::Neq(..) => OPCode::Neq,
+            Instruction::Lt(..) => OPCode::Lt,
+            Instruction::Lte(..) => OPCode::Lte,
+            Instruction::Gt(..) => OPCode::Gt,
+            Instruction::Gte(..) => OPCode::Gte,
+            Instruction::Return(..) => OPCode::Return,
+            Instruction::Call(..) => OPCode::Call,
+            Instruction::Jump(..) => OPCode::Jump,
+            Instruction::Branch(..) => OPCode::Branch,
+            Instruction::Id(..) => OPCode::Id,
+            Instruction::Nop => OPCode::Nop,
+            Instruction::Label(..) => OPCode::Label,
         }
-    }
-
-    /// Returns the destination of the instruction if there is one.
-    pub fn dst(&self) -> Option<&String> {
-        match self {
-            Instruction::Constant { dst, .. }
-            | Instruction::Value { dst, .. } => Some(dst),
-            _ => None,
-        }
-    }
-
-    /// Returns the arguments of an instruction if there are any.
-    pub fn args(&self) -> Option<&Vec<String>> {
-        match self {
-            Instruction::Effect { args, .. }
-            | Instruction::Value { args, .. } => Some(args),
-            _ => None,
-        }
-    }
-
-    /// Return the `Nop` instruction.
-    pub fn nop() -> Instruction {
-        Instruction::Nop
-    }
-
-    /// Emit a constant instruction.
-    fn constant(dst: String, const_type: Type, value: Literal) -> Instruction {
-        Instruction::Constant {
-            dst,
-            op: ConstOp::Const,
-            const_type,
-            value,
-        }
-    }
-
-    /// Emit a jump instruction.
-    fn jmp(target: String) -> Instruction {
-        Instruction::Effect {
-            args: vec![target],
-            op: EffectOp::Jump,
-        }
-    }
-
-    /// Emit a branch instruction.
-    fn branch(
-        cond: String,
-        then_target: String,
-        else_target: String,
-    ) -> Instruction {
-        Instruction::Effect {
-            args: vec![cond, then_target, else_target],
-            op: EffectOp::Branch,
-        }
-    }
-
-    /// Emit a label instruction.
-    fn label(name: String) -> Instruction {
-        Instruction::Label { name }
-    }
-
-    /// Emit a return instruction.
-    fn ret(value: String) -> Instruction {
-        Instruction::Effect {
-            args: vec![value],
-            op: EffectOp::Return,
-        }
-    }
-
-    /// Emit an arithmetic operation.
-    fn arith(
-        dst: String,
-        op_type: Type,
-        op: ValueOp,
-        args: Vec<String>,
-    ) -> Instruction {
-        Instruction::Value {
-            args,
-            dst,
-            op,
-            op_type,
-        }
-    }
-
-    /// Emit a comparison operation.
-    fn cmp(
-        dst: String,
-        op_type: Type,
-        op: ValueOp,
-        args: Vec<String>,
-    ) -> Instruction {
-        Instruction::Value {
-            args,
-            dst,
-            op,
-            op_type,
-        }
-    }
-
-    /// Emit an identity operation.
-    fn id(dst: String, op_type: Type, args: Vec<String>) -> Instruction {
-        Instruction::Value {
-            args,
-            dst,
-            op: ValueOp::Id,
-            op_type,
-        }
-    }
-
-    /// Emit a call operation.
-    fn call(
-        dst: String,
-        op_type: Type,
-        name: String,
-        mut args: Vec<String>,
-    ) -> Instruction {
-        // Name is the first argument.
-        let mut func_args = vec![name];
-        func_args.append(&mut args);
-
-        Instruction::Value {
-            args: func_args,
-            dst,
-            op: ValueOp::Call,
-            op_type,
-        }
-    }
-}
-
-/// `Argument` is a wrapper around a name and type it represents a single
-/// function argument.
-#[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Argument {
-    // Argument name.
-    name: String,
-    // Argument type.
-    kind: Type,
-}
-
-impl fmt::Display for Argument {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.name, self.kind)
-    }
-}
-
-impl Argument {
-    fn new(name: String, kind: Type) -> Self {
-        Self { name, kind }
     }
 }
 
@@ -637,6 +501,14 @@ impl fmt::Display for BasicBlock {
         Ok(())
     }
 }
+/// Scope of the current AST node we are processing, this is an internal detail
+/// of the `IRBuilder` and is used to decide where the current declaration will
+/// live.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Scope {
+    Global,
+    Local,
+}
 
 /// `Function` represents a function declaration in the AST, a `Function`
 /// is composed as a linear sequence of GIR instructions.
@@ -645,11 +517,37 @@ pub struct Function {
     // Function name.
     name: String,
     // List of arguments the function accepts.
-    args: Vec<Argument>,
+    args: Vec<Symbol>,
     // Body of the function as GIR instructions.
     pub body: Vec<Instruction>,
     // Return type of the function if any.
     return_type: Type,
+}
+
+impl Function {
+    fn new(name: &str, args: Vec<Symbol>, return_type: Type) -> Self {
+        Self {
+            name: name.to_string(),
+            args: args,
+            body: vec![],
+            return_type: return_type,
+        }
+    }
+
+    /// Push an instruction to the function's body.
+    fn push(&mut self, inst: &Instruction) {
+        self.body.push(inst.clone())
+    }
+
+    /// Returns a non-mutable slice of the function's body.
+    pub fn instructions(&self) -> &[Instruction] {
+        &self.body
+    }
+
+    /// Returns a mutable slice of the function's body.
+    pub fn instructions_mut(&mut self) -> &mut [Instruction] {
+        self.body.as_mut()
+    }
 }
 
 impl fmt::Display for Function {
@@ -679,139 +577,131 @@ impl fmt::Display for Function {
     }
 }
 
-impl Function {
-    /// Create a new function with a name.
-    fn new(name: String, args: Vec<Argument>, return_type: Type) -> Self {
-        Self {
-            name,
-            args,
-            return_type,
-            body: vec![],
+/// `IRBuilderTrackingRef` is a tuple of position within the function
+/// being currently lowered, a scope enum value to deal with nesting
+/// and a pointer to the symbol table level we start symbol resolution
+/// from.
+struct IRBuilderTrackingRef(usize, usize, Scope);
+
+impl IRBuilderTrackingRef {
+    // Return the index of the current function we are generating instructions
+    // for.
+    fn pos(&self) -> usize {
+        self.0
+    }
+
+    // Return the current scope.
+    fn scope(&self) -> Scope {
+        self.2
+    }
+
+    // Enter switches to a local scope view and increments the symbol table
+    // level.
+    fn enter(&mut self) {
+        self.1 += 1;
+        self.2 = Scope::Local;
+    }
+
+    // Exit back to the global scope, since the IR does not have nested scopes
+    // calling `exit` always restores the scope back to `Scope::Global`.
+    fn exit(&mut self) {
+        // Exit signals that we completed building a single functional unit
+        // so our position in the global program IR is increased by 1 since
+        // the next unit will be a new function in the program.
+        self.0 += 1;
+        // Decide if we are exiting back to a local scope or the top level
+        // global scope.
+        //
+        // If `self.1` is equal to `1` then we are exiting back to the global
+        // scope, otherwise we are still in a local scope.
+        if self.1 == 1 {
+            self.2 = Scope::Global;
+        } else {
+            self.2 = Scope::Local;
         }
-    }
-
-    /// Push an instruction.
-    fn push(&mut self, inst: Instruction) {
-        self.body.push(inst)
-    }
-
-    /// Return a non-mutable reference to the function instructions.
-    pub fn instructions(&self) -> &[Instruction] {
-        &self.body
-    }
-
-    /// Return a mutable reference to the function instructions.
-    pub fn instructions_mut(&mut self) -> &mut [Instruction] {
-        self.body.as_mut()
-    }
-
-    /// Return a mutable reference to the function instructions as a `Vec`.
-    pub fn instructions_mut_vec(&mut self) -> &mut Vec<Instruction> {
-        &mut self.body
-    }
-
-    /// Insert the instruction at the given position.
-    pub fn insert(&mut self, inst: &Instruction, pos: usize) {
-        self.body.insert(pos, inst.clone())
-    }
-
-    /// Remove the instruction at the given position.
-    pub fn remove(&mut self, pos: usize) {
-        let _ = self.body.remove(pos);
-    }
-
-    /// Form a list of basic blocks from the function, the ownership of
-    /// the returned `Vec` is transferred to the caller.
-    pub fn form_basic_blocks(&self) -> Vec<BasicBlock> {
-        let mut blocks = Vec::new();
-        let mut current = BasicBlock::new();
-        for inst in &self.body {
-            if inst.is_label() {
-                if !current.instructions().is_empty() {
-                    blocks.push(current)
-                }
-                match inst {
-                    Instruction::Label { .. } => {
-                        current = BasicBlock::new();
-                        current.push(inst);
-                    }
-                    _ => unreachable!(),
-                }
-            } else {
-                current.push(inst);
-                if inst.is_terminator() {
-                    blocks.push(current);
-                    current = BasicBlock::new();
-                }
-            }
-        }
-        blocks
-    }
-
-    /// Reassemble a list of basic blocks into the current function body
-    /// replacing its existing instructions.
-    ///
-    /// The function consumes the input blocks, leaving them empty.
-    pub fn reassemble_from_basic_blocks(&mut self, blocks: &mut [BasicBlock]) {
-        let mut instructions = Vec::with_capacity(self.body.len());
-
-        for block in blocks {
-            instructions.append(block.instructions_mut())
-        }
-
-        instructions.clone_into(&mut self.body)
+        self.1 -= 1;
     }
 }
 
-/// Scope of the current AST node we are processing, this is an internal detail
-/// of the `IRBuilder` and is used to decide where the current declaration will
-/// live.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Scope {
-    Global,
-    Local,
+/// `LocationLabelCounter` is a tuple of variable and label counters used
+/// to generate monotonically increasing indices for temporaries and labels.
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+struct LocationLabelCounter(usize, usize);
+
+impl LocationLabelCounter {
+    fn new() -> Self {
+        Self(0, 0)
+    }
+
+    fn next_location(&mut self) -> usize {
+        let next = self.0;
+        self.0 += 1;
+        next
+    }
+
+    fn next_label(&mut self) -> usize {
+        let next = self.1;
+        self.1 += 1;
+        next
+    }
 }
 
-/// `IRBuilder` is responsible for building the intermediate representation of
-/// an AST. The result of the process is a `Vec` of all functions defined in
-/// the program and a `Vec` of all the globals declared in the program.
+/// `GlobalValue` is a tuple of variable name and a compile time literal.
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct GlobalValue(Symbol, Literal);
+
+/// `IRBuilder` is responsible for lowering the AST to the intermediate
+/// representation, the first lowering phase results in a program represented
+/// as a tuple of global values and functions. This first representation is
+/// linear (functions are just `Vec<Instruction>`) and is used as a starting
+/// point for building a graph representation.
 pub struct IRBuilder<'a> {
     // Reference to the AST we are processing.
     ast: &'a ast::AST,
     // Symbol table built during semantic analysis phase.
-    symbol_table: &'a SymbolTable,
+    symbol_table: &'a sema::SymbolTable,
     // Program as a sequence of declared functions.
     program: Vec<Function>,
     // Global scope declarations.
-    globals: Vec<Instruction>,
+    globals: Vec<GlobalValue>,
     // Counter used to keep track of temporaries, temporaries are storage
     // assignemnts for transient or non assigned values such as a literals.
-    var_count: u32,
-    // Counter used to keep track of labels used as jump targets.
-    label_count: u32,
-    // Index in the `program` of the current function we are building.
-    curr: usize,
-    // Current scope.
-    scope: Scope,
-    // Symbol table level we are at currently, increments by 1 when we enter
-    // a scope and decrements by 1 when we exit. This is used to set the
-    // starting point when resolving symbols in the symbol table.
-    level: usize,
+    llc: LocationLabelCounter,
+    // TrackingRef for the `IRBuilder` acts as a composite pointer to keep track
+    // of metadata that's useful during the lowering phase.
+    tracker: IRBuilderTrackingRef,
 }
 
 impl<'a> IRBuilder<'a> {
-    #[must_use]
     pub fn new(ast: &'a ast::AST, symbol_table: &'a sema::SymbolTable) -> Self {
         Self {
             program: vec![],
             globals: vec![],
-            var_count: 0,
-            label_count: 0,
-            curr: 0,
-            level: 0,
-            scope: Scope::Global,
+            llc: LocationLabelCounter(0, 0),
+            tracker: IRBuilderTrackingRef(0, 0, Scope::Global),
             ast,
             symbol_table,
+        }
+    }
+    /// Push a slice of instructions to the current function's body.
+    fn push(&mut self, instrs: &[Instruction]) {
+        match self.tracker.scope() {
+            Scope::Local => {
+                for inst in instrs {
+                    self.program[self.tracker.pos()].push(inst)
+                }
+            }
+            Scope::Global => {
+                // The global IR scope can only contain constant or id
+                // instructions.
+                for inst in instrs {
+                    assert!(matches!(
+                        inst.opcode(),
+                        OPCode::Const | OPCode::Id
+                    ));
+                    self.program[0].push(inst);
+                }
+            }
         }
     }
 
@@ -821,59 +711,13 @@ impl<'a> IRBuilder<'a> {
     }
 
     /// Returns a mutable reference to the program functions.
-    pub fn functions_mut(&mut self) -> &mut Vec<Function> {
-        self.program.as_mut()
+    pub fn functions_mut(&mut self) -> &mut [Function] {
+        &mut self.program
     }
 
     /// Returns a non-mutable reference to the program globals.
-    pub const fn globals(&self) -> &Vec<Instruction> {
+    pub const fn globals(&self) -> &Vec<GlobalValue> {
         &self.globals
-    }
-
-    /// Returns a fresh variable name, used for intermediate literals.
-    fn next_var(&mut self) -> String {
-        let var = format!("v{}", self.var_count);
-        self.var_count += 1;
-        var
-    }
-
-    /// Returns a fresh label, used for jumps.
-    fn next_label(&mut self) -> String {
-        let label = format!(".LABEL_{}", self.label_count);
-        self.label_count += 1;
-        label
-    }
-
-    /// Push an instruction to the current scope.
-    fn push(&mut self, inst: Instruction) {
-        match self.scope {
-            Scope::Local => self.program[self.curr].push(inst),
-            Scope::Global => {
-                // The only instruction allowed in the global scope is
-                // the constant instruction.
-                assert!(
-                    inst.opcode() == OPCode::Const
-                        || inst.opcode() == OPCode::Id,
-                    "found {:?} ",
-                    inst.opcode()
-                );
-                self.globals.push(inst)
-            }
-        }
-    }
-
-    /// Switch to a local scope view.
-    fn enter(&mut self, func: Function) {
-        self.program.push(func);
-        self.level += 1;
-        self.scope = Scope::Local
-    }
-
-    /// Exit back to the global scope.
-    fn exit(&mut self) {
-        self.scope = Scope::Global;
-        self.level -= 1;
-        self.curr += 1
     }
 
     pub fn gen(&mut self) {
@@ -883,11 +727,11 @@ impl<'a> IRBuilder<'a> {
     }
 }
 
-impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
+impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
     fn visit_decl(
         &mut self,
         decl: &ast::Decl,
-    ) -> (Option<String>, Vec<Instruction>) {
+    ) -> (Option<Value>, Vec<Instruction>) {
         match decl {
             // Function declarations are the only place where we need to switch
             // scopes explicitely, since the scope only affects where variable
@@ -903,7 +747,7 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     .iter()
                     .map(|arg| match self.ast.get_stmt(*arg) {
                         Some(ast::Stmt::FuncArg { decl_type, name }) => {
-                            Argument::new(name.to_string(), Type::from(decl_type))
+                            Symbol::new(name, Type::from(decl_type))
                         }
                         _ => unreachable!(
                         "expected argument reference to be valid and to be `ast::Stmt::FuncArg`"
@@ -911,23 +755,18 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     })
                     .collect::<Vec<_>>();
                 let func_return_type = Type::from(return_type);
-                let func = Function::new(
-                    name.to_string(),
-                    func_args,
-                    func_return_type,
-                );
+                let func = Function::new(name, func_args, func_return_type);
                 // Enter a new scope and push the new function frame.
-                self.enter(func);
+                self.program.push(func);
+                self.tracker.enter();
                 // Generate IR for the body.
                 let (span, code) = match self.ast.get_stmt(*body) {
                     Some(stmt) => self.visit_stmt(stmt),
                     _ => unreachable!("expected body reference to be valid !"),
                 };
-                for inst in &code {
-                    self.push(inst.clone());
-                }
+                self.push(&code);
                 // Exit back to the global scope.
-                self.exit();
+                self.tracker.exit();
                 (span, code)
             }
             ast::Decl::GlobalVar {
@@ -935,7 +774,7 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 name,
                 value,
             } => {
-                let dst = name.clone();
+                let dst = Symbol::new(name, Type::from(decl_type));
                 let (arg, mut code) =
                     if let Some(expr) = self.ast.get_expr(*value) {
                         self.visit_expr(expr)
@@ -945,14 +784,13 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                         )
                     };
                 // Get the destination of the right hand side.
-                code.push(Instruction::id(
+                code.push(Instruction::Id(
                     dst.clone(),
-                    Type::from(decl_type),
-                    vec![arg.expect(
-                        "Expected right handside to be in a temporary variable",
-                    )],
+                    arg.expect(
+                        "Expected right handside to be a valid temporary",
+                    ),
                 ));
-                (Some(dst), code)
+                (Some(Value::StorageLocation(dst)), code)
             }
         }
     }
@@ -960,7 +798,7 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
     fn visit_stmt(
         &mut self,
         stmt: &ast::Stmt,
-    ) -> (Option<String>, Vec<Instruction>) {
+    ) -> (Option<Value>, Vec<Instruction>) {
         match stmt {
             // Variable declaration are
             ast::Stmt::LocalVar {
@@ -968,7 +806,7 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 name,
                 value,
             } => {
-                let dst = name.clone();
+                let dst = Symbol::new(name, Type::from(decl_type));
                 let (arg, mut code) =
                     if let Some(expr) = self.ast.get_expr(*value) {
                         self.visit_expr(expr)
@@ -978,18 +816,19 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                         )
                     };
                 // Get the destination of the right hand side.
-                code.push(Instruction::id(
+                // Get the destination of the right hand side.
+                code.push(Instruction::Id(
                     dst.clone(),
-                    Type::from(decl_type),
-                    vec![arg.expect(
-                        "Expected right handside to be in a temporary variable",
-                    )],
+                    arg.expect(
+                        "Expected right handside to be a valid temporary",
+                    ),
                 ));
-                (Some(dst), code)
+                (Some(Value::StorageLocation(dst)), code)
             }
             // Blocks.
             ast::Stmt::Block(stmts) => {
-                self.level += 1;
+                // self.level += 1;
+                self.tracker.1 += 1;
                 let mut code = vec![];
                 for stmt_ref in stmts {
                     let (_, mut block) =
@@ -1003,12 +842,13 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
 
                     code.append(&mut block);
                 }
-                self.level -= 1;
+                // self.level -= 1;
+                self.tracker.1 -= 1;
                 (None, code)
             }
             // Return statements.
             ast::Stmt::Return(expr_ref) => {
-                let (name, mut code) =
+                let (value, mut code) =
                     if let Some(expr) = self.ast.get_expr(*expr_ref) {
                         self.visit_expr(expr)
                     } else {
@@ -1016,12 +856,12 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                             "Expected right handside to be a valid expression"
                         )
                     };
-
-                let ret = Instruction::ret(name.clone().expect(
+                let ret = Instruction::Return(value.clone().expect(
                     "Expected right handside to be temporary or named",
                 ));
+
                 code.push(ret);
-                (name, code)
+                (value, code)
             }
             // Expression statements.
             ast::Stmt::Expr(expr_ref) => {
@@ -1049,19 +889,19 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                         "Expected condition to reference a valid expression"
                     )
                     };
-                let then_label = self.next_label();
-                let else_label = self.next_label();
-                let end_label = self.next_label();
+                let then_label = self.llc.next_label();
+                let else_label = self.llc.next_label();
+                let end_label = self.llc.next_label();
 
                 // Push branch instruction.
-                let inst = Instruction::branch(
+                let inst = Instruction::Branch(
                     condition.expect("Expected condition variable to be valid"),
-                    then_label.clone(),
-                    else_label.clone(),
+                    Label(then_label),
+                    Label(else_label),
                 );
                 code.push(inst);
                 // Push then label.
-                let inst = Instruction::label(then_label);
+                let inst = Instruction::Label(then_label);
                 code.push(inst);
                 // Generate instruction for the then block.
                 let (_, mut block) =
@@ -1079,11 +919,11 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     OPCode::Return => false,
                     _ => true,
                 }) {
-                    let inst = Instruction::jmp(end_label.clone());
+                    let inst = Instruction::Jump(Label(end_label));
                     code.push(inst);
                 }
                 // Push else label.
-                let inst = Instruction::label(else_label);
+                let inst = Instruction::Label(else_label);
                 code.push(inst);
                 // Generate instruction for the else block if one exists.
                 if else_block.is_some() {
@@ -1102,11 +942,11 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     OPCode::Return => false,
                     _ => true,
                 }) {
-                    let inst = Instruction::jmp(end_label.clone());
+                    let inst = Instruction::Jump(Label(end_label));
                     code.push(inst);
                 }
                 // Push end label.
-                let inst = Instruction::label(end_label);
+                let inst = Instruction::Label(end_label);
                 code.push(inst);
 
                 (None, code)
@@ -1126,8 +966,8 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                 body,
             } => {
                 // Generate labels for the loop.
-                let loop_body_label = self.next_label();
-                let loop_exit_label = self.next_label();
+                let loop_body_label = self.llc.next_label();
+                let loop_exit_label = self.llc.next_label();
                 let mut code = Vec::new();
                 // Generate initializer block if it exists.
                 if init.is_some() {
@@ -1141,7 +981,7 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     code.append(&mut block);
                 }
                 // Generate the loop body label.
-                let inst = Instruction::label(loop_body_label.clone());
+                let inst = Instruction::Label(loop_body_label);
                 code.push(inst);
                 // Generate the loop body block.
                 let (_, mut block) =
@@ -1179,27 +1019,28 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     };
                     code.append(&mut block);
                     // Generate branch to exit code.
-                    let inst = Instruction::branch(
+                    let inst = Instruction::Branch(
                         condition
                             .expect("Expected condition variable to be valid"),
-                        loop_body_label.clone(),
-                        loop_exit_label.clone(),
+                        Label(loop_body_label),
+                        Label(loop_exit_label),
                     );
+
                     code.push(inst);
                 }
                 // Generate the loop exit code.
-                let inst = Instruction::label(loop_exit_label.clone());
+                let inst = Instruction::Label(loop_exit_label);
                 code.push(inst);
                 (None, code)
             }
             ast::Stmt::While { condition, body } => {
                 // Generate labels for the loop.
-                let loop_body_label = self.next_label();
-                let loop_exit_label = self.next_label();
+                let loop_body_label = self.llc.next_label();
+                let loop_exit_label = self.llc.next_label();
                 let mut code = Vec::new();
                 if body.is_some() {
                     // Generate the loop body label.
-                    let inst = Instruction::label(loop_body_label.clone());
+                    let inst = Instruction::Label(loop_body_label);
                     code.push(inst);
                     // Generate the loop body block.
                     let (_, mut block) = if let Some(block) = self.ast.get_stmt(
@@ -1224,16 +1065,16 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     };
                     code.append(&mut block);
                     // Generate branch to exit code.
-                    let inst = Instruction::branch(
+                    let inst = Instruction::Branch(
                         condition
                             .expect("Expected condition variable to be valid"),
-                        loop_body_label.clone(),
-                        loop_exit_label.clone(),
+                        Label(loop_body_label),
+                        Label(loop_exit_label),
                     );
                     code.push(inst);
                 }
                 // Generate the loop exit code.
-                let inst = Instruction::label(loop_exit_label.clone());
+                let inst = Instruction::Label(loop_exit_label);
                 code.push(inst);
                 (None, code)
             }
@@ -1244,43 +1085,46 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
     fn visit_expr(
         &mut self,
         expr: &ast::Expr,
-    ) -> (Option<String>, Vec<Instruction>) {
+    ) -> (Option<Value>, Vec<Instruction>) {
         match *expr {
             ast::Expr::IntLiteral(value) => {
                 let mut code = vec![];
-                let dst = self.next_var();
-                code.push(Instruction::constant(
-                    dst.clone(),
+                let dst = Symbol::new(
+                    format!("%v{}", self.llc.next_location()).as_str(),
                     Type::Int,
-                    Literal::Int(value),
+                );
+                code.push(Instruction::Const(
+                    dst.clone(),
+                    Value::ConstantLiteral(Literal::Int(value)),
                 ));
-                (Some(dst), code)
+                (Some(Value::StorageLocation(dst)), code)
             }
             ast::Expr::BoolLiteral(value) => {
                 let mut code = vec![];
-                let dst = self.next_var();
-                code.push(Instruction::constant(
-                    dst.clone(),
+                let dst = Symbol::new(
+                    format!("%v{}", self.llc.next_location()).as_str(),
                     Type::Bool,
-                    Literal::Bool(value),
+                );
+                code.push(Instruction::Const(
+                    dst.clone(),
+                    Value::ConstantLiteral(Literal::Bool(value)),
                 ));
-                (Some(dst), code)
+                (Some(Value::StorageLocation(dst)), code)
             }
             ast::Expr::CharLiteral(value) => {
                 let mut code = vec![];
-                let dst = self.next_var();
-                code.push(Instruction::constant(
-                    dst.clone(),
+                let dst = Symbol::new(
+                    format!("%v{}", self.llc.next_location()).as_str(),
                     Type::Char,
-                    Literal::Char(value),
+                );
+                code.push(Instruction::Const(
+                    dst.clone(),
+                    Value::ConstantLiteral(Literal::Char(value)),
                 ));
-                (Some(dst), code)
+                (Some(Value::StorageLocation(dst)), code)
             }
             ast::Expr::UnaryOp { operator, operand } => {
-                // TODO: Visitor for IR will return a lhs assignee and an instruction
-                // for the rhs assignment.
-                // let src = self.visit_expr(self.ast.get_expr(operand).unwrap());
-                let (name, mut code) =
+                let (operand, mut code) =
                     if let Some(expr) = self.ast.get_expr(operand) {
                         self.visit_expr(expr)
                     } else {
@@ -1289,31 +1133,33 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                         )
                     };
 
-                let dst = self.next_var();
-                let inst = match operator {
-                    ast::UnaryOperator::Neg => Instruction::arith(
-                        dst.clone(),
+                let dst = match operator {
+                    ast::UnaryOperator::Neg => Symbol::new(
+                        format!("%v{}", self.llc.next_location()).as_str(),
                         Type::Int,
-                        ValueOp::Neg,
-                        vec![name
-                            .expect(
-                                "Expected right handside to be in a temporary",
-                            )
-                            .clone()],
                     ),
-                    ast::UnaryOperator::Not => Instruction::arith(
-                        dst.clone(),
+                    ast::UnaryOperator::Not => Symbol::new(
+                        format!("%v{}", self.llc.next_location()).as_str(),
                         Type::Bool,
-                        ValueOp::Not,
-                        vec![name
-                            .expect(
-                                "Expected right handside to be in a temporary",
-                            )
-                            .clone()],
+                    ),
+                };
+                let _dst = dst.clone();
+                let inst = match operator {
+                    ast::UnaryOperator::Neg => Instruction::Neg(
+                        dst,
+                        operand.expect(
+                            "Expected right handside to be in a temporary",
+                        ),
+                    ),
+                    ast::UnaryOperator::Not => Instruction::Not(
+                        dst,
+                        operand.expect(
+                            "Expected right handside to be in a temporary",
+                        ),
                     ),
                 };
                 code.push(inst);
-                (Some(dst), code)
+                (Some(Value::StorageLocation(_dst)), code)
             }
             ast::Expr::BinOp {
                 left,
@@ -1341,61 +1187,48 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                     };
                 code.append(&mut code_right);
 
-                let dst = self.next_var();
-                let inst = match operator {
+                let t = match operator {
                     ast::BinaryOperator::Add
                     | ast::BinaryOperator::Sub
                     | ast::BinaryOperator::Mul
-                    | ast::BinaryOperator::Div
-                    | ast::BinaryOperator::And
-                    | ast::BinaryOperator::Or => Instruction::arith(
-                        dst.clone(),
-                        Type::Int,
-                        ValueOp::from(&operator),
-                        vec![
-                            lhs.expect(
-                                "Expected right handside to be in a temporary",
-                            )
-                            .clone(),
-                            rhs.expect(
-                                "Expected right handside to be in a temporary",
-                            )
-                            .clone(),
-                        ],
-                    ),
-                    ast::BinaryOperator::Eq
-                    | ast::BinaryOperator::Neq
-                    | ast::BinaryOperator::Gt
-                    | ast::BinaryOperator::Gte
-                    | ast::BinaryOperator::Lt
-                    | ast::BinaryOperator::Lte => Instruction::cmp(
-                        dst.clone(),
-                        Type::Bool,
-                        ValueOp::from(&operator),
-                        vec![
-                            lhs.expect(
-                                "Expected right handside to be in a temporary",
-                            )
-                            .clone(),
-                            rhs.expect(
-                                "Expected right handside to be in a temporary",
-                            )
-                            .clone(),
-                        ],
-                    ),
+                    | ast::BinaryOperator::Div => Type::Int,
+                    _ => Type::Bool,
+                };
+
+                let dst = Symbol::new(
+                    format!("%v{}", self.llc.next_location()).as_str(),
+                    t,
+                );
+                let lhs = lhs.expect("Expected valid left handside value");
+                let rhs = rhs.expect("Expected valid right handside value");
+                let _dst = dst.clone();
+                let inst = match operator {
+                    ast::BinaryOperator::Add => Instruction::Add(dst, lhs, rhs),
+                    ast::BinaryOperator::Sub => Instruction::Sub(dst, lhs, rhs),
+                    ast::BinaryOperator::Mul => Instruction::Mul(dst, lhs, rhs),
+                    ast::BinaryOperator::Div => Instruction::Div(dst, lhs, rhs),
+                    ast::BinaryOperator::Eq => Instruction::Eq(dst, lhs, rhs),
+                    ast::BinaryOperator::Neq => Instruction::Neq(dst, lhs, rhs),
+                    ast::BinaryOperator::Gt => Instruction::Gt(dst, lhs, rhs),
+                    ast::BinaryOperator::Gte => Instruction::Gte(dst, lhs, rhs),
+                    ast::BinaryOperator::Lt => Instruction::Lt(dst, lhs, rhs),
+                    ast::BinaryOperator::Lte => Instruction::Lte(dst, lhs, rhs),
+                    ast::BinaryOperator::And => Instruction::And(dst, lhs, rhs),
+                    ast::BinaryOperator::Or => Instruction::Or(dst, lhs, rhs),
                 };
 
                 code.push(inst);
-                (Some(dst), code)
+                (Some(Value::StorageLocation(_dst)), code)
             }
             ast::Expr::Named(ref name) => {
-                let _t = match self.symbol_table.find(name, self.level) {
+                let _t = match self.symbol_table.find(name, self.tracker.1) {
                     Some(symbol) => symbol.t(),
                     None => unreachable!(
                         "Expected a symbol for named expression : `{name}`"
                     ),
                 };
-                (Some(name.clone()), vec![])
+                let name = Symbol::new(name, Type::from(&_t));
+                (Some(Value::StorageLocation(name)), vec![])
             }
             ast::Expr::Grouping(expr_ref) => {
                 let (name, code) =
@@ -1429,9 +1262,13 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                         "Expected right handside to be a valid expression"
                     )
                 };
-                let t = match self
-                    .symbol_table
-                    .find(&lhs.clone().unwrap(), self.level)
+                let location = match lhs {
+                    Some(Value::StorageLocation(ref sym)) => sym.0.clone(),
+                    _ => unreachable!(
+                        "Expected assignment lvalue to be a storage location"
+                    ),
+                };
+                let t = match self.symbol_table.find(&location, self.tracker.1)
                 {
                     Some(symbol) => symbol.t(),
                     None => unreachable!(
@@ -1439,25 +1276,27 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                         lhs.unwrap()
                     ),
                 };
-                code.push(Instruction::id(
-                    lhs.clone().unwrap(),
-                    Type::from(&t),
-                    vec![rhs.unwrap()],
-                ));
-                (lhs, code)
+                let inst = Instruction::Id(
+                    Symbol::new(&location, Type::from(&t)),
+                    rhs.expect(
+                        "Expected assignment rvalue to be a valid value",
+                    ),
+                );
+                code.push(inst);
+                (lhs.clone(), code)
             }
             ast::Expr::Call { name, ref args } => {
                 let name = match self.ast.get_expr(name) {
                     Some(ast::Expr::Named(name)) => name,
                     _ => unreachable!("Expected reference to be a named expression for a function"),
                 };
-                let t = match self.symbol_table.find(name, self.level) {
+                let t = match self.symbol_table.find(name, self.tracker.1) {
                     Some(symbol) => symbol.t(),
                     None => unreachable!(
                         "Expected a symbol for named expression : `{name}`"
                     ),
                 };
-                let (vars, code): (Vec<String>, Vec<Vec<Instruction>>) = args
+                let (vars, code): (Vec<Value>, Vec<Vec<Instruction>>) = args
                     .iter()
                     .map(|arg| {
                         if let Some(expr) = self.ast.get_expr(*arg) {
@@ -1470,17 +1309,20 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
                         }
                     })
                     .unzip();
+
                 let mut code: Vec<Instruction> =
                     code.into_iter().flatten().collect();
-                let dst = self.next_var();
-                let inst = Instruction::call(
-                    dst.clone(),
+                let dst = Symbol::new(
+                    format!("%v{}", self.llc.next_location()).as_str(),
                     Type::from(&t),
-                    name.to_string(),
+                );
+                let inst = Instruction::Call(
+                    dst.clone(),
+                    Symbol::new(name, Type::from(&t)),
                     vars,
                 );
                 code.push(inst);
-                (Some(dst), code)
+                (Some(Value::StorageLocation(dst)), code)
             }
         }
     }
@@ -1488,7 +1330,7 @@ impl<'a> ast::Visitor<(Option<String>, Vec<Instruction>)> for IRBuilder<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ir::IRBuilder;
+    use super::*;
     use crate::parser::Parser;
     use crate::scanner::Scanner;
     use crate::sema::analyze;
@@ -1506,23 +1348,65 @@ mod tests {
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
                 let symbol_table = analyze(parser.ast());
-                // println!("{symbol_table}");
 
                 let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
                 irgen.gen();
 
+                let mut actual = "".to_string();
                 for func in irgen.functions() {
-                    println!("{func}");
+                    // println!("{func}");
+                    actual.push_str(format!("{func}").as_str());
                 }
+                // For readability trim the newlines at the start and end
+                // of our IR text fixture.
+                let expected = $expected
+                    .strip_suffix("\n")
+                    .and($expected.strip_prefix("\n"));
+                assert_eq!(actual, expected.unwrap())
             }
         };
     }
 
-    test_ir_gen!(can_generate_const_ops, "int main() { return 0;}", &vec![]);
+    test_ir_gen!(
+        can_generate_const_ops,
+        "int main() { return 0;}",
+        r#"
+@main: int {
+   %v0: int = const 0
+   ret %v0
+}
+"#
+    );
+
     test_ir_gen!(
         can_generate_unary_ops,
         "int main() { bool a = !true; return 0;}",
-        &vec![]
+        r#"
+@main: int {
+   %v0: bool = const true
+   %v1: bool = not %v0
+   a: bool = id %v1
+   %v2: int = const 0
+   ret %v2
+}
+"#
+    );
+
+    test_ir_gen!(
+        can_generate_binary_logical_ops,
+        "int main() { bool a = (true && false) || false; return 0;}",
+        r#"
+@main: int {
+   %v0: bool = const true
+   %v1: bool = const false
+   %v2: bool = and %v0 %v1
+   %v3: bool = const false
+   %v4: bool = or %v2 %v3
+   a: bool = id %v4
+   %v5: int = const 0
+   ret %v5
+}
+"#
     );
     test_ir_gen!(
         can_generate_multiple_assignments,
@@ -1535,12 +1419,37 @@ mod tests {
             int f = -e;
             return f;
         }"#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: bool = const true
+   %v1: bool = not %v0
+   a: bool = id %v1
+   %v2: bool = const false
+   %v3: bool = not %v2
+   b: bool = id %v3
+   %v4: bool = not a
+   c: bool = id %v4
+   %v5: bool = not b
+   d: bool = id %v5
+   %v6: int = const 12345679
+   e: int = id %v6
+   %v7: int = neg e
+   f: int = id %v7
+   ret f
+}
+"#
     );
     test_ir_gen!(
         can_generate_function_arguments,
         "int main() {} int f(int a, int b) { return a + b;}",
-        &vec![]
+        r#"
+@main: int {
+}
+@f(a: int, b: int): int {
+   %v0: int = add a b
+   ret %v0
+}
+"#
     );
     test_ir_gen!(
         can_generate_binary_ops,
@@ -1557,7 +1466,40 @@ mod tests {
             bool j = d <= c;
             return 0;
         }"#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 1
+   %v1: int = const 1
+   %v2: int = add %v0 %v1
+   a: int = id %v2
+   %v3: int = const 2
+   %v4: int = const 2
+   %v5: int = sub %v3 %v4
+   b: int = id %v5
+   %v6: int = const 3
+   %v7: int = const 3
+   %v8: int = mul %v6 %v7
+   c: int = id %v8
+   %v9: int = const 4
+   %v10: int = const 4
+   %v11: int = div %v9 %v10
+   d: int = id %v11
+   %v12: bool = eq a b
+   e: bool = id %v12
+   %v13: bool = neq b c
+   f: bool = id %v13
+   %v14: bool = gt c d
+   g: bool = id %v14
+   %v15: bool = gte c d
+   h: bool = id %v15
+   %v16: bool = lt d c
+   i: bool = id %v16
+   %v17: bool = lte d c
+   j: bool = id %v17
+   %v18: int = const 0
+   ret %v18
+}
+"#
     );
     test_ir_gen!(
         can_generate_assignment,
@@ -1566,7 +1508,15 @@ mod tests {
             a = 42;
             return a;
 }"#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 0
+   a: int = id %v0
+   %v1: int = const 42
+   a: int = id %v1
+   ret a
+}
+"#
     );
     test_ir_gen!(
         can_generate_assignments,
@@ -1578,7 +1528,19 @@ mod tests {
             b = a;
             return b;
         }"#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 0
+   a: int = id %v0
+   %v1: int = const 0
+   b: int = id %v1
+   %v2: int = const 42
+   c: int = id %v2
+   a: int = id c
+   b: int = id a
+   ret b
+}
+"#
     );
     test_ir_gen!(
         can_generate_function_calls,
@@ -1588,7 +1550,18 @@ mod tests {
                 return f(1,2);
             }
         "#,
-        &vec![]
+        r#"
+@f(a: int, b: int): int {
+   %v0: int = add a b
+   ret %v0
+}
+@main: int {
+   %v1: int = const 1
+   %v2: int = const 2
+   %v3: int = call @f %v1 %v2
+   ret %v3
+}
+"#
     );
     test_ir_gen!(
         can_generate_if_block_without_else_branch,
@@ -1602,7 +1575,24 @@ mod tests {
             return a + b;
         }
         "#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 42
+   a: int = id %v0
+   %v1: int = const 17
+   b: int = id %v1
+   %v2: bool = gt a b
+   br %v2 .LABEL_0 .LABEL_1
+   .LABEL_0
+   %v3: int = sub a b
+   ret %v3
+   .LABEL_1
+   jmp .LABEL_2
+   .LABEL_2
+   %v4: int = add a b
+   ret %v4
+}
+"#
     );
     test_ir_gen!(
         can_generate_for_loop,
@@ -1616,7 +1606,29 @@ mod tests {
                 return 0;
             }
         "#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 0
+   i: int = id %v0
+   %v1: int = const 0
+   x: int = id %v1
+   %v2: int = const 1
+   i: int = id %v2
+   .LABEL_0
+   %v3: int = const 1
+   %v4: int = add i %v3
+   x: int = id %v4
+   %v5: int = const 1
+   %v6: int = add i %v5
+   i: int = id %v6
+   %v7: int = const 100
+   %v8: bool = lte i %v7
+   br %v8 .LABEL_0 .LABEL_1
+   .LABEL_1
+   %v9: int = const 0
+   ret %v9
+}
+"#
     );
     test_ir_gen!(
         can_generate_while_loop,
@@ -1631,7 +1643,26 @@ mod tests {
                 return x;
             }
         "#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 0
+   i: int = id %v0
+   %v1: int = const 0
+   x: int = id %v1
+   .LABEL_0
+   %v2: int = const 1
+   %v3: int = add x %v2
+   x: int = id %v3
+   %v4: int = const 1
+   %v5: int = add i %v4
+   i: int = id %v5
+   %v6: int = const 100
+   %v7: bool = lte i %v6
+   br %v7 .LABEL_0 .LABEL_1
+   .LABEL_1
+   ret x
+}
+"#
     );
 
     test_ir_gen!(
@@ -1648,7 +1679,21 @@ mod tests {
                 return x;
             }
         "#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 0
+   i: int = id %v0
+   %v1: int = const 0
+   x: int = id %v1
+   %v2: int = const 1
+   x: int = id %v2
+   %v3: int = const 2
+   y: int = id %v3
+   %v4: int = add x y
+   i: int = id %v4
+   ret x
+}
+"#
     );
 
     test_ir_gen!(
@@ -1658,14 +1703,56 @@ mod tests {
                 int x = (5 * 3 + (7 / 2) - 1) * 2/7;
                 int y = ((4 - 3) * (7 + 5)) * 1/7;
                 int z = (5 - 5) * (4 + 4 - 16);
-                int v = x * y - z;
+                int w = x * y - z;
 
-                return v;
+                return w;
             }
         "#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 5
+   %v1: int = const 3
+   %v2: int = mul %v0 %v1
+   %v3: int = const 7
+   %v4: int = const 2
+   %v5: int = div %v3 %v4
+   %v6: int = add %v2 %v5
+   %v7: int = const 1
+   %v8: int = sub %v6 %v7
+   %v9: int = const 2
+   %v10: int = mul %v8 %v9
+   %v11: int = const 7
+   %v12: int = div %v10 %v11
+   x: int = id %v12
+   %v13: int = const 4
+   %v14: int = const 3
+   %v15: int = sub %v13 %v14
+   %v16: int = const 7
+   %v17: int = const 5
+   %v18: int = add %v16 %v17
+   %v19: int = mul %v15 %v18
+   %v20: int = const 1
+   %v21: int = mul %v19 %v20
+   %v22: int = const 7
+   %v23: int = div %v21 %v22
+   y: int = id %v23
+   %v24: int = const 5
+   %v25: int = const 5
+   %v26: int = sub %v24 %v25
+   %v27: int = const 4
+   %v28: int = const 4
+   %v29: int = add %v27 %v28
+   %v30: int = const 16
+   %v31: int = sub %v29 %v30
+   %v32: int = mul %v26 %v31
+   z: int = id %v32
+   %v33: int = mul x y
+   %v34: int = sub %v33 z
+   w: int = id %v34
+   ret w
+}
+"#
     );
-
     test_ir_gen!(
         can_canonicalize_constant_literals,
         r#"
@@ -1673,6 +1760,13 @@ mod tests {
                 return 1+1;
             }
         "#,
-        &vec![]
+        r#"
+@main: int {
+   %v0: int = const 1
+   %v1: int = const 1
+   %v2: int = add %v0 %v1
+   ret %v2
+}
+"#
     );
 }
