@@ -114,7 +114,7 @@ impl DCE {
         // Remove all instructions marked as dead i.e replaced with `Nop`.
         function.remove_dead_instructions();
 
-        candidates != function.instructions().len()
+        candidates != function.len()
     }
 }
 

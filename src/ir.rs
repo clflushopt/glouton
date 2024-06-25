@@ -546,6 +546,11 @@ impl Function {
         self.body.push(inst.clone())
     }
 
+    /// Returns the number of instructions in the function.
+    pub fn len(&self) -> usize {
+        self.body.len()
+    }
+
     /// Returns a non-mutable slice of the function's body.
     pub fn instructions(&self) -> &[Instruction] {
         &self.body
@@ -566,25 +571,6 @@ impl Function {
     /// Returns a mutable slice of the function's basic blocks.
     pub fn basic_blocks_mut(&mut self) -> &mut [BasicBlock] {
         self.basic_blocks.as_mut()
-    }
-
-    /// Returns a non-mutable iterator over the function's instructions.
-    pub fn inst_iter(&self) -> InstIter<'_> {
-        InstIter::new(self)
-    }
-
-    /// Returns a non-mutable iterator over the function's basic blocks.
-    ///
-    /// The function's basic blocks are re-computed each time a new iterator
-    /// is called and are not memoized. The reason we choose this apporach
-    /// is that forming basic blocks is O(n) and is relatively cheap with
-    /// respect to the alternative (memoized blocks).
-    ///
-    /// If we were to memoize blocks then each pass over the function can
-    /// potentially invalidate the iterator.
-    pub fn basic_block_iter(&mut self) -> BasicBlockIter<'_> {
-        self.form_basic_blocks();
-        BasicBlockIter::new(self)
     }
 
     /// Form the function's basic blocks.
@@ -618,52 +604,6 @@ impl Function {
             Instruction::Nop => false,
             _ => true,
         })
-    }
-}
-
-/// `InstIterator` allows you to iterate over a function's instructions.
-pub struct InstIter<'a> {
-    iter: Iter<'a, Instruction>,
-    function: &'a Function,
-}
-
-impl<'a> InstIter<'a> {
-    fn new(function: &'a Function) -> Self {
-        Self {
-            iter: function.body.iter(),
-            function: function,
-        }
-    }
-}
-
-impl<'a> Iterator for InstIter<'a> {
-    type Item = &'a Instruction;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next()
-    }
-}
-
-/// `BasicBlockIterator` allows you to iterate over a function's basic blocks.
-pub struct BasicBlockIter<'a> {
-    iter: Iter<'a, BasicBlock>,
-    function: &'a Function,
-}
-
-impl<'a> BasicBlockIter<'a> {
-    fn new(funtion: &'a Function) -> Self {
-        Self {
-            function: funtion,
-            iter: funtion.basic_blocks.iter(),
-        }
-    }
-}
-
-impl<'a> Iterator for BasicBlockIter<'a> {
-    type Item = &'a BasicBlock;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next()
     }
 }
 
