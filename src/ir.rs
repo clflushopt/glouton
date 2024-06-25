@@ -11,9 +11,13 @@
 //! `const` and `id` are core to the way the IR is structured as they allow us
 //! to easily translate into and out of SSA form; with potentially translating
 //! out of SSA can forgo the rename phase and just prune all the phi nodes.
-use std::fmt;
+use std::{fmt, slice::Iter};
 
-use crate::{ast, ast::Visitor, sema};
+use crate::{
+    ast::{self, Visitor},
+    cfg::Graph,
+    sema,
+};
 
 /// Types used in the IR.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -487,7 +491,7 @@ impl BasicBlock {
         std::mem::replace(&mut self.instrs[index], Instruction::Nop)
     }
 
-    /// Push an instruction to the basic block.
+    /// Copies the instruction and pushes it into the basic blocks.
     pub fn push(&mut self, inst: &Instruction) {
         self.instrs.push(inst.clone())
     }
@@ -518,19 +522,22 @@ pub struct Function {
     name: String,
     // List of arguments the function accepts.
     args: Vec<Symbol>,
-    // Body of the function as GIR instructions.
-    pub body: Vec<Instruction>,
-    // Return type of the function if any.
+    // Body of the function.
+    body: Vec<Instruction>,
+    // Function's return type.
     return_type: Type,
+    // Basic blocks constructed from the functions body.
+    basic_blocks: Vec<BasicBlock>,
 }
 
 impl Function {
     fn new(name: &str, args: Vec<Symbol>, return_type: Type) -> Self {
         Self {
             name: name.to_string(),
-            args: args,
+            args,
             body: vec![],
-            return_type: return_type,
+            basic_blocks: vec![],
+            return_type,
         }
     }
 
@@ -547,6 +554,116 @@ impl Function {
     /// Returns a mutable slice of the function's body.
     pub fn instructions_mut(&mut self) -> &mut [Instruction] {
         self.body.as_mut()
+    }
+
+    /// Returns a non-mutable slice of the function's basic blocks
+    /// `form_basic_blocks` must be explicitely called for the iterator
+    /// to be valid.
+    pub fn basic_blocks(&self) -> &[BasicBlock] {
+        &self.basic_blocks
+    }
+
+    /// Returns a mutable slice of the function's basic blocks.
+    pub fn basic_blocks_mut(&mut self) -> &mut [BasicBlock] {
+        self.basic_blocks.as_mut()
+    }
+
+    /// Returns a non-mutable iterator over the function's instructions.
+    pub fn inst_iter(&self) -> InstIter<'_> {
+        InstIter::new(self)
+    }
+
+    /// Returns a non-mutable iterator over the function's basic blocks.
+    ///
+    /// The function's basic blocks are re-computed each time a new iterator
+    /// is called and are not memoized. The reason we choose this apporach
+    /// is that forming basic blocks is O(n) and is relatively cheap with
+    /// respect to the alternative (memoized blocks).
+    ///
+    /// If we were to memoize blocks then each pass over the function can
+    /// potentially invalidate the iterator.
+    pub fn basic_block_iter(&mut self) -> BasicBlockIter<'_> {
+        self.form_basic_blocks();
+        BasicBlockIter::new(self)
+    }
+
+    /// Form the function's basic blocks.
+    fn form_basic_blocks(&mut self) {
+        let mut current = BasicBlock::new();
+        for inst in &self.body {
+            if inst.label() {
+                if !current.instructions().is_empty() {
+                    self.basic_blocks.push(current)
+                }
+                match inst {
+                    Instruction::Label { .. } => {
+                        current = BasicBlock::new();
+                        current.push(inst);
+                    }
+                    _ => unreachable!(),
+                }
+            } else {
+                current.push(inst);
+                if inst.terminator() {
+                    self.basic_blocks.push(current);
+                    current = BasicBlock::new();
+                }
+            }
+        }
+    }
+
+    /// Remove all dead instructions (`Nop`) in the function.
+    pub fn remove_dead_instructions(&mut self) {
+        self.body.retain(|inst| match inst {
+            Instruction::Nop => false,
+            _ => true,
+        })
+    }
+}
+
+/// `InstIterator` allows you to iterate over a function's instructions.
+pub struct InstIter<'a> {
+    iter: Iter<'a, Instruction>,
+    function: &'a Function,
+}
+
+impl<'a> InstIter<'a> {
+    fn new(function: &'a Function) -> Self {
+        Self {
+            iter: function.body.iter(),
+            function: function,
+        }
+    }
+}
+
+impl<'a> Iterator for InstIter<'a> {
+    type Item = &'a Instruction;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+}
+
+/// `BasicBlockIterator` allows you to iterate over a function's basic blocks.
+pub struct BasicBlockIter<'a> {
+    iter: Iter<'a, BasicBlock>,
+    function: &'a Function,
+}
+
+impl<'a> BasicBlockIter<'a> {
+    fn new(funtion: &'a Function) -> Self {
+        Self {
+            function: funtion,
+            iter: funtion.basic_blocks.iter(),
+        }
+    }
+}
+
+impl<'a> Iterator for BasicBlockIter<'a> {
+    type Item = &'a BasicBlock;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
     }
 }
 

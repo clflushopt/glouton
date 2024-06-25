@@ -70,11 +70,11 @@ impl DCE {
     /// Trivial Global DCE pass on a function returns `true` if any instructions
     /// are eliminated.
     pub fn tdce(function: &mut ir::Function) -> bool {
-        let mut worklist = function.instructions_mut().to_vec();
+        let worklist = function.instructions_mut();
         let candidates = worklist.len();
         let mut use_defs = HashSet::new();
 
-        for inst in &worklist {
+        for inst in &mut *worklist {
             // Check for instruction uses, if an instruction is uses defs
             // we remove them from the `defs` set.
             match inst.operands() {
@@ -103,7 +103,7 @@ impl DCE {
             }
         }
 
-        for inst in &mut worklist {
+        for inst in &mut *worklist {
             if inst
                 .destination()
                 .is_some_and(|dst| !use_defs.contains(dst))
@@ -111,16 +111,8 @@ impl DCE {
                 let _ = std::mem::replace(inst, ir::Instruction::Nop);
             }
         }
-
-        // Filter the worklist keeping only non-noop instructions, the usage
-        // of `into_iter()` is necessary otherwise we end up with a container
-        // `Vec<&Instruction>` which we can't "clone" back into the function
-        // body.
-        worklist
-            .into_iter()
-            .filter(|inst| inst.opcode() != ir::OPCode::Nop)
-            .collect::<Vec<_>>()
-            .clone_into(&mut function.body);
+        // Remove all instructions marked as dead i.e replaced with `Nop`.
+        function.remove_dead_instructions();
 
         candidates != function.instructions().len()
     }
@@ -185,6 +177,18 @@ mod tests {
                 for func in irgen.functions_mut() {
                     println!("Post-Pass function: {}", func);
                 }
+
+                let mut actual = "".to_string();
+                for func in irgen.functions() {
+                    // println!("{func}");
+                    actual.push_str(format!("{func}").as_str());
+                }
+                // For readability trim the newlines at the start and end
+                // of our IR text fixture.
+                let expected = $expected
+                    .strip_suffix("\n")
+                    .and($expected.strip_prefix("\n"));
+                assert_eq!(actual, expected.unwrap())
             }
         };
     }
@@ -224,7 +228,8 @@ mod tests {
    %v3: int = add a b
    d: int = id %v3
    ret d
-}"#
+}
+"#
     );
 
     test_optimization_pass!(
@@ -246,6 +251,7 @@ mod tests {
    %v0: int = const 42
    a: int = id %v0
    ret a
-}"#
+}
+"#
     );
 }
