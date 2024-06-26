@@ -707,6 +707,26 @@ impl LocationLabelCounter {
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct GlobalValue(Symbol, Literal);
 
+/// A program is a group of functions and globals.
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct Program {
+    globals: Vec<GlobalValue>,
+    functions: Vec<Function>,
+}
+
+impl fmt::Display for Program {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for global in &self.globals {
+            writeln!(f, "{}: {}", global.0, global.1)?
+        }
+
+        for func in &self.functions {
+            writeln!(f, "{}", func)?
+        }
+        Ok(())
+    }
+}
+
 /// `IRBuilder` is responsible for lowering the AST to the intermediate
 /// representation, the first lowering phase results in a program represented
 /// as a tuple of global values and functions. This first representation is
@@ -832,22 +852,21 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                 value,
             } => {
                 let dst = Symbol::new(name, Type::from(decl_type));
-                let (arg, mut code) =
-                    if let Some(expr) = self.ast.get_expr(*value) {
-                        self.visit_expr(expr)
-                    } else {
-                        unreachable!(
-                            "Expected right handside to be a valid expression"
-                        )
-                    };
-                // Get the destination of the right hand side.
-                code.push(Instruction::Id(
-                    dst.clone(),
-                    arg.expect(
-                        "Expected right handside to be a valid temporary",
-                    ),
-                ));
-                (Some(Value::StorageLocation(dst)), code)
+                let (arg, code) = if let Some(expr) = self.ast.get_expr(*value)
+                {
+                    self.visit_expr(expr)
+                } else {
+                    unreachable!(
+                        "Expected right handside to be a valid expression"
+                    )
+                };
+                match arg {
+                    Some(Value::ConstantLiteral(literal)) => {
+                        self.globals.push(GlobalValue(dst, literal));
+                        (None, code)
+                    }
+                    _ => (None, vec![]),
+                }
             }
         }
     }
@@ -1823,6 +1842,17 @@ mod tests {
    %v1: int = const 1
    %v2: int = add %v0 %v1
    ret %v2
+}
+"#
+    );
+
+    test_ir_gen!(
+        can_inline_global_variables,
+        "int global = 1;int main() { return global;}",
+        r#"
+@main: int {
+   %v0: int = const 0
+   ret %v0
 }
 "#
     );
