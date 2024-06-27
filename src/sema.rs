@@ -120,7 +120,7 @@ impl SymbolTable {
 
     // Find a symbol by starting from the given index, the index should be in
     // the range of symbol tables stack.
-    pub fn find(&self, name: &str, start: usize) -> Option<&Symbol> {
+    pub fn find(&self, name: &str, start: usize) -> Option<(&Symbol, usize)> {
         // Get a reference to the current scope we're processing
         let mut idx = if start >= self.tables.len() {
             // Should be unreacheable ?
@@ -133,7 +133,7 @@ impl SymbolTable {
             // Try and find the declaration in the current scope.
             for (ident, symbol) in current_scope_table {
                 if ident == name {
-                    return Some(symbol);
+                    return Some((symbol, idx));
                 }
             }
             // If we didn't find the declaration in the current scope
@@ -448,7 +448,10 @@ impl<'a> SemanticAnalyzer<'a> {
     /// Lookup an existing binding by name, returns a `Symbol`
     /// if one is found otherwise none.
     fn lookup(&self, name: &str) -> Option<&Symbol> {
-        self.symbol_table.find(name, self.current_scope)
+        match self.symbol_table.find(name, self.current_scope) {
+            Some((symbol, ..)) => Some(symbol),
+            None => None,
+        }
     }
     /// Enter a new scope by increment the current scope pointer.
     fn enter_scope(&mut self) {

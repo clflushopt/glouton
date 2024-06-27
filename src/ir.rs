@@ -11,7 +11,7 @@
 //! `const` and `id` are core to the way the IR is structured as they allow us
 //! to easily translate into and out of SSA form; with potentially translating
 //! out of SSA can forgo the rename phase and just prune all the phi nodes.
-use std::{fmt, slice::Iter};
+use std::{collections::HashMap, fmt, slice::Iter};
 
 use crate::{
     ast::{self, Visitor},
@@ -747,7 +747,16 @@ pub struct IRBuilder<'a> {
     // TrackingRef for the `IRBuilder` acts as a composite pointer to keep track
     // of metadata that's useful during the lowering phase.
     tracker: IRBuilderTrackingRef,
+    // Virtual register state used to map original identifiers from the symbol
+    // table to virtual registers.
+    register_state: VirtualRegisterState,
 }
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+struct ScopedSymbol(String, usize);
+
+#[derive(Debug, Default, Clone)]
+struct VirtualRegisterState(std::collections::HashMap<ScopedSymbol, Symbol>);
 
 impl<'a> IRBuilder<'a> {
     pub fn new(ast: &'a ast::AST, symbol_table: &'a sema::SymbolTable) -> Self {
@@ -756,6 +765,7 @@ impl<'a> IRBuilder<'a> {
             globals: vec![],
             llc: LocationLabelCounter(0, 0),
             tracker: IRBuilderTrackingRef(0, 0, Scope::Global),
+            register_state: VirtualRegisterState::default(),
             ast,
             symbol_table,
         }
@@ -851,7 +861,17 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                 name,
                 value,
             } => {
-                let dst = Symbol::new(name, Type::from(decl_type));
+                let original_identifier =
+                    ScopedSymbol(name.clone(), self.tracker.1);
+                let virtual_register_number = self.llc.next_location();
+                let virtual_register = Symbol::new(
+                    format!("@{virtual_register_number}").as_str(),
+                    Type::from(decl_type),
+                );
+                self.register_state
+                    .0
+                    .insert(original_identifier, virtual_register.clone());
+                let dst = virtual_register;
                 let (arg, code) = if let Some(expr) = self.ast.get_expr(*value)
                 {
                     self.visit_expr(expr)
@@ -882,7 +902,18 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                 name,
                 value,
             } => {
-                let dst = Symbol::new(name, Type::from(decl_type));
+                let original_identifier =
+                    ScopedSymbol(name.clone(), self.tracker.1);
+                let virtual_register_number = self.llc.next_location();
+                let virtual_register = Symbol::new(
+                    format!("%{virtual_register_number}").as_str(),
+                    Type::from(decl_type),
+                );
+                self.register_state
+                    .0
+                    .insert(original_identifier, virtual_register.clone());
+                let dst = virtual_register;
+                //let dst = Symbol::new(name, Type::from(decl_type));
                 let (arg, mut code) =
                     if let Some(expr) = self.ast.get_expr(*value) {
                         self.visit_expr(expr)
@@ -1297,14 +1328,23 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                 (Some(Value::StorageLocation(_dst)), code)
             }
             ast::Expr::Named(ref name) => {
-                let _t = match self.symbol_table.find(name, self.tracker.1) {
-                    Some(symbol) => symbol.t(),
-                    None => unreachable!(
-                        "Expected a symbol for named expression : `{name}`"
-                    ),
+                let (scope, _t) =
+                    match self.symbol_table.find(name, self.tracker.1) {
+                        Some((symbol, idx)) => (idx, symbol.t()),
+                        None => unreachable!(
+                            "Expected a symbol for named expression : `{name}`"
+                        ),
+                    };
+
+                let (original, virtual_register) = match self.register_state.0.get_key_value(&ScopedSymbol(name.clone(),scope )) {
+                    Some(reg) => reg,
+                    None => unreachable!("Expected local declaration {} to be mapped to a virtual register", name),
                 };
-                let name = Symbol::new(name, Type::from(&_t));
-                (Some(Value::StorageLocation(name)), vec![])
+
+                (
+                    Some(Value::StorageLocation(virtual_register.clone())),
+                    vec![],
+                )
             }
             ast::Expr::Grouping(expr_ref) => {
                 let (name, code) =
@@ -1346,7 +1386,7 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                 };
                 let t = match self.symbol_table.find(&location, self.tracker.1)
                 {
-                    Some(symbol) => symbol.t(),
+                    Some((symbol, ..)) => symbol.t(),
                     None => unreachable!(
                         "Expected a symbol for named expression : `{}`",
                         lhs.unwrap()
@@ -1367,7 +1407,7 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                     _ => unreachable!("Expected reference to be a named expression for a function"),
                 };
                 let t = match self.symbol_table.find(name, self.tracker.1) {
-                    Some(symbol) => symbol.t(),
+                    Some((symbol, ..)) => symbol.t(),
                     None => unreachable!(
                         "Expected a symbol for named expression : `{name}`"
                     ),
@@ -1851,8 +1891,7 @@ mod tests {
         "int global = 1;int main() { return global;}",
         r#"
 @main: int {
-   %v0: int = const 0
-   ret %v0
+   ret global
 }
 "#
     );
