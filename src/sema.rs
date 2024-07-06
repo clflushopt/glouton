@@ -148,6 +148,7 @@ impl SymbolTable {
     }
 
     // Bind a new symbol to the current scope.
+    //
     // # Panics
     // When `name` is already bound, binding fails.
     fn bind(&mut self, name: &str, sym: Symbol) {
@@ -189,7 +190,32 @@ impl SymbolTable {
         let table = HashMap::new();
         self.tables.push(table);
         self.parent = self.current;
-        self.current += 1;
+        self.current = self.tables.len() - 1;
+        // Current scope is not always current + 1, consider two scopes 1 and 2
+        // the other, when exiting back from scope 1 the next entry is not 2
+        // but three, because it's an entirely different scope and its parent
+        // is the current scope (scope 0).
+        //
+        // Example:
+        // current=0
+        // parent=0
+        // scope 0
+        // {
+        //   current=1
+        //   parent=0
+        //   scope 1
+        //  {
+        //      current=2
+        //      parent=1
+        //  }
+        // }
+        // current=0
+        // parent=0
+        // scope 0
+        // {
+        //   scope 2
+        // }
+        self.current = self.tables.len() - 1;
     }
 
     // Leave the current scope returning the parent.
@@ -471,17 +497,21 @@ impl<'a> SemanticAnalyzer<'a> {
     /// a panic.
     pub fn resolve(&self, expr: &ast::Expr) -> DeclType {
         match expr {
-            ast::Expr::Named(name) => match self.lookup(name) {
+            ast::Expr::Named(name) => {
+                match self.lookup(name) {
                 Some(sym) => sym.t(),
                 None => panic!("Identifer {name} was not found, ensure it is declared before use."),
-            },
+            }
+            }
             ast::Expr::Call {
                 name: name_ref,
                 args,
             } => {
                 let name = match self.ast.get_expr(*name_ref) {
                     Some(ast::Expr::Named(name)) => name,
-                    _ => unreachable!("Expected call expression to reference `NamedExpr`"),
+                    _ => unreachable!(
+                        "Expected call expression to reference `NamedExpr`"
+                    ),
                 };
                 match self.lookup(name) {
                     Some(Symbol::FunctionDefinition {
@@ -506,19 +536,27 @@ impl<'a> SemanticAnalyzer<'a> {
                                 let expr_t = self.resolve(expr);
                                 assert_eq!(*symbol_t, expr_t, "Expected function `{name}` call argument to be of the same type")
                             } else {
-                                unreachable!("Expression at ref {} was not found", arg_ref.get())
+                                unreachable!(
+                                    "Expression at ref {} was not found",
+                                    arg_ref.get()
+                                )
                             }
                         }
                         *t
                     }
-                    _ => unreachable!("Call expression is only allowed for functions."),
+                    _ => unreachable!(
+                        "Call expression is only allowed for functions."
+                    ),
                 }
             }
             ast::Expr::Grouping(group_ref) => {
                 if let Some(group) = self.ast.get_expr(*group_ref) {
                     self.resolve(group)
                 } else {
-                    unreachable!("Expression at ref {} was not found.", group_ref.get())
+                    unreachable!(
+                        "Expression at ref {} was not found.",
+                        group_ref.get()
+                    )
                 }
             }
             ast::Expr::Assignment { name, value } => {
@@ -541,22 +579,32 @@ impl<'a> SemanticAnalyzer<'a> {
                                 _ => symbol.t(),
                             }
                         } else {
-                            unreachable!("No symbol with name {identifier} was found.")
+                            unreachable!(
+                                "No symbol with name {identifier} was found."
+                            )
                         }
                     }
-                    _ => unreachable!("Expression at ref {} was not found", name.get()),
+                    _ => unreachable!(
+                        "Expression at ref {} was not found",
+                        name.get()
+                    ),
                 };
                 let rvalue = match self.ast.get_expr(*value) {
                     Some(expr) => {
                         // Ensure r-value is assignable.
                         match expr {
                             ast::Expr::Assignment { .. } => {
-                                unreachable!("R-value can't be assignment expression.")
+                                unreachable!(
+                                    "R-value can't be assignment expression."
+                                )
                             }
                             _ => self.resolve(expr),
                         }
                     }
-                    None => unreachable!("Expression at ref {} was not found.", value.get()),
+                    None => unreachable!(
+                        "Expression at ref {} was not found.",
+                        value.get()
+                    ),
                 };
                 assert_eq!(
                     lvalue, rvalue,
@@ -572,12 +620,18 @@ impl<'a> SemanticAnalyzer<'a> {
                 let lhs = if let Some(lhs) = self.ast.get_expr(*left) {
                     self.resolve(lhs)
                 } else {
-                    unreachable!("LHS expression at ref {} was not found.", left.get())
+                    unreachable!(
+                        "LHS expression at ref {} was not found.",
+                        left.get()
+                    )
                 };
                 let rhs = if let Some(rhs) = self.ast.get_expr(*right) {
                     self.resolve(rhs)
                 } else {
-                    unreachable!("RHS expression at ref {} was not found.", right.get())
+                    unreachable!(
+                        "RHS expression at ref {} was not found.",
+                        right.get()
+                    )
                 };
                 match operator {
                     &ast::BinaryOperator::Add
@@ -911,14 +965,7 @@ mod tests {
                 parser.parse();
 
                 let mut decl_analyzer = DeclAnalyzer::new(parser.ast());
-                let symbol_table = decl_analyzer.analyze();
-
-                for (ii, table) in symbol_table.tables.iter().enumerate() {
-                    println!("Scope @ {}", ii);
-                    for (name, symbol) in table {
-                        println!("{} => {}", name, symbol);
-                    }
-                }
+                let _ = decl_analyzer.analyze();
             }
         };
     }
@@ -940,13 +987,6 @@ mod tests {
                 let symbol_table = decl_analyzer.analyze();
                 let mut semantic_analyzer =
                     SemanticAnalyzer::new(parser.ast(), symbol_table);
-                println!("AST: {}", parser.ast());
-                for (ii, table) in symbol_table.tables.iter().enumerate() {
-                    println!("Scope @ {}", ii);
-                    for (name, symbol) in table {
-                        println!("{} => {}", name, symbol);
-                    }
-                }
 
                 ast::walk(parser.ast(), &mut semantic_analyzer)
             }
@@ -978,9 +1018,75 @@ mod tests {
         "int main() { int i = 0; for(i=0;i<10;i = i + 1) {int b; int c; int d = i;} }"
     );
 
+    test_decl_analyzer!(
+        can_process_function_calls_with_arguments,
+        "int main() {} int f(int a, int b) { return a + b;}"
+    );
+
+    test_decl_analyzer!(
+        can_process_if_else_blocks,
+        r#"
+int scopes(int x,int y,int z) {
+    if (true) {
+            int x = z; 
+            int y = x;
+            int z = y;
+    } else {
+            int x = x; 
+            int y = y;
+            int z = z;
+     }
+    return x+y+z;
+}
+        "#
+    );
+
+    test_decl_analyzer!(
+        can_process_non_nested_scopes,
+        r#"
+int scopes(int x,int y,int z) {
+        int a = x;
+    {
+            int x = z; 
+            int y = x;
+            int z = y;
+    }
+    {
+            int x = x; 
+            int y = y;
+            int z = z;
+     }
+    return x+y+z;
+}
+        "#
+    );
+
+    test_decl_analyzer!(
+        can_properly_handle_successive_non_nested_decls,
+        r#"
+int ifelses(int x,int y,int z) {
+    if (true) {
+            int x = z; 
+            int y = x;
+            int z = y;
+    } else {
+            int x = x; 
+            int y = y;
+            int z = z;
+     }
+    return x+y+z;
+}
+        "#
+    );
+
     test_semantic_analyzer!(
         can_find_duplicate_redefinition,
         "int main() {} int main() {}"
+    );
+
+    test_semantic_analyzer!(
+        can_find_missing_function_argument,
+        "int main() {} int f(int a) { return a + b;}"
     );
 
     test_semantic_analyzer!(

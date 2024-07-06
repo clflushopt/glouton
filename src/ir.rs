@@ -1430,7 +1430,6 @@ mod tests {
 
                 let mut actual = "".to_string();
                 for func in irgen.functions() {
-                    // println!("{func}");
                     actual.push_str(format!("{func}").as_str());
                 }
                 // For readability trim the newlines at the start and end
@@ -1517,13 +1516,23 @@ mod tests {
     );
     test_ir_gen!(
         can_generate_function_arguments,
-        "int main() {} int f(int a, int b) { return a + b;}",
+        "
+        int f(int a, int b) {
+         return a + b;
+        }
+        int main() {
+            return f(5,3);
+        }",
         r#"
-@main: int {
-}
 @f(a: int, b: int): int {
    %v0: int = add a b
    ret %v0
+}
+@main: int {
+   %v1: int = const 5
+   %v2: int = const 3
+   %v3: int = call @f %v1 %v2
+   ret %v3
 }
 "#
     );
@@ -1851,8 +1860,45 @@ mod tests {
         "int global = 1;int main() { return global;}",
         r#"
 @main: int {
-   %v0: int = const 0
-   ret %v0
+   ret global
+}
+"#
+    );
+
+    test_ir_gen!(
+        can_canonicalize_non_nested_scopes,
+        r#"
+int scopes(int x,int y,int z) {
+    if (true) {
+            int x = z; 
+            int y = x;
+            int z = y;
+    } else {
+            int x = x; 
+            int y = y;
+            int z = z;
+     }
+    return x+y+z;
+}
+"#,
+        r#"
+@scopes(x: int, y: int, z: int): int {
+   %v0: bool = const true
+   br %v0 .LABEL_0 .LABEL_1
+   .LABEL_0
+   x: int = id z
+   y: int = id x
+   z: int = id y
+   jmp .LABEL_2
+   .LABEL_1
+   x: int = id x
+   y: int = id y
+   z: int = id z
+   jmp .LABEL_2
+   .LABEL_2
+   %v1: int = add x y
+   %v2: int = add %v1 z
+   ret %v2
 }
 "#
     );

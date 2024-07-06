@@ -159,7 +159,6 @@ mod tests {
                 let mut parser = Parser::new(&tokens);
                 parser.parse();
                 let symbol_table = analyze(parser.ast());
-                println!("{symbol_table}");
 
                 let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
                 irgen.gen();
@@ -168,19 +167,12 @@ mod tests {
                 let dce = DCE {};
 
                 for func in irgen.functions_mut() {
-                    println!("Pre-Pass function: {}", func);
-                }
-                for func in irgen.functions_mut() {
                     ident.run(func);
                     dce.run(func);
-                }
-                for func in irgen.functions_mut() {
-                    println!("Post-Pass function: {}", func);
                 }
 
                 let mut actual = "".to_string();
                 for func in irgen.functions() {
-                    // println!("{func}");
                     actual.push_str(format!("{func}").as_str());
                 }
                 // For readability trim the newlines at the start and end
