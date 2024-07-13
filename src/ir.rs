@@ -1816,6 +1816,44 @@ mod tests {
     );
 
     test_ir_gen!(
+        can_generate_if_else_conditions,
+        r#"
+int main() {
+    int a = 4;
+    int b = 2;
+    int c = 0;
+    if (a < b) {
+        int c = a + b;
+    } else {
+        int d = a - b;
+    }
+    return c;
+}"#,
+        r#"
+@main: int {
+   %v0: int = const 4
+   a: int = id %v0
+   %v1: int = const 2
+   b: int = id %v1
+   %v2: int = const 0
+   c: int = id %v2
+   %v3: bool = lt a b
+   br %v3 .LABEL_0 .LABEL_1
+   .LABEL_0
+   %v4: int = add a b
+   c: int = id %v4
+   jmp .LABEL_2
+   .LABEL_1
+   %v5: int = sub a b
+   d: int = id %v5
+   jmp .LABEL_2
+   .LABEL_2
+   ret c
+}
+"#
+    );
+
+    test_ir_gen!(
         can_inline_global_variables,
         "int global = 1;int main() { return global;}",
         r#"
