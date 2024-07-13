@@ -19,20 +19,12 @@ pub trait Transform {
     fn run(&self, function: &mut ir::Function) {}
 }
 
-/// Identity transform implements the `Transform` interface but actually
-/// does nothing.
+/// Identity transform implements the identity transformation which is a noop.
 #[derive(Default, Debug)]
 struct Identity {}
 
 impl Transform for Identity {
-    fn run(&self, function: &mut ir::Function) {
-        // Get a list of basic blocks.
-        // let bbs = function.form_basic_blocks();
-
-        // for bb in bbs {
-        //     println!("{}", bb)
-        // }
-    }
+    fn run(&self, function: &mut ir::Function) {}
 }
 
 /// Instruction combination pass executes over basic blocks and tries to
@@ -58,6 +50,11 @@ impl Transform for ConstantFold {}
 struct CSE {}
 
 impl Transform for CSE {}
+
+/// Local Value Number implementation.
+struct LVN {}
+
+impl LVN {}
 
 /// Dead code elimination pass eliminates unused and unreachable instructions.
 ///
@@ -201,7 +198,7 @@ mod tests {
     );
 
     test_optimization_pass!(
-        can_trivially_dce_dead_store,
+        can_trivially_dce_dead_stores,
         r#"
             int main() {
                 int a = 4;

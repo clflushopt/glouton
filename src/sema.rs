@@ -191,30 +191,6 @@ impl SymbolTable {
         self.tables.push(table);
         self.parent = self.current;
         self.current = self.tables.len() - 1;
-        // Current scope is not always current + 1, consider two scopes 1 and 2
-        // the other, when exiting back from scope 1 the next entry is not 2
-        // but three, because it's an entirely different scope and its parent
-        // is the current scope (scope 0).
-        //
-        // Example:
-        // current=0
-        // parent=0
-        // scope 0
-        // {
-        //   current=1
-        //   parent=0
-        //   scope 1
-        //  {
-        //      current=2
-        //      parent=1
-        //  }
-        // }
-        // current=0
-        // parent=0
-        // scope 0
-        // {
-        //   scope 2
-        // }
         self.current = self.tables.len() - 1;
     }
 
@@ -1036,6 +1012,32 @@ int scopes(int x,int y,int z) {
             int y = y;
             int z = z;
      }
+    return x+y+z;
+}
+        "#
+    );
+
+    test_decl_analyzer!(
+        can_process_multiple_nested_scopes,
+        r#"
+int scopes(int x,int y,int z) {
+        int a = x;
+    {
+        {
+            {
+            }
+            {
+            }
+            {
+            }
+        }
+    }
+    {
+        {
+            {
+            }
+        }
+    }
     return x+y+z;
 }
         "#

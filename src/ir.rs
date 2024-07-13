@@ -526,8 +526,6 @@ pub struct Function {
     body: Vec<Instruction>,
     // Function's return type.
     return_type: Type,
-    // Basic blocks constructed from the functions body.
-    basic_blocks: Vec<BasicBlock>,
 }
 
 impl Function {
@@ -536,7 +534,6 @@ impl Function {
             name: name.to_string(),
             args,
             body: vec![],
-            basic_blocks: vec![],
             return_type,
         }
     }
@@ -559,43 +556,6 @@ impl Function {
     /// Returns a mutable slice of the function's body.
     pub fn instructions_mut(&mut self) -> &mut [Instruction] {
         self.body.as_mut()
-    }
-
-    /// Returns a non-mutable slice of the function's basic blocks
-    /// `form_basic_blocks` must be explicitely called for the iterator
-    /// to be valid.
-    pub fn basic_blocks(&self) -> &[BasicBlock] {
-        &self.basic_blocks
-    }
-
-    /// Returns a mutable slice of the function's basic blocks.
-    pub fn basic_blocks_mut(&mut self) -> &mut [BasicBlock] {
-        self.basic_blocks.as_mut()
-    }
-
-    /// Form the function's basic blocks.
-    fn form_basic_blocks(&mut self) {
-        let mut current = BasicBlock::new();
-        for inst in &self.body {
-            if inst.label() {
-                if !current.instructions().is_empty() {
-                    self.basic_blocks.push(current)
-                }
-                match inst {
-                    Instruction::Label { .. } => {
-                        current = BasicBlock::new();
-                        current.push(inst);
-                    }
-                    _ => unreachable!(),
-                }
-            } else {
-                current.push(inst);
-                if inst.terminator() {
-                    self.basic_blocks.push(current);
-                    current = BasicBlock::new();
-                }
-            }
-        }
     }
 
     /// Remove all dead instructions (`Nop`) in the function.
