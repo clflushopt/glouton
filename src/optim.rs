@@ -198,13 +198,85 @@ mod tests {
     );
 
     test_optimization_pass!(
-        can_trivially_dce_dead_stores,
+        can_trivially_dce_single_dead_store,
         r#"
             int main() {
                 int a = 4;
                 int b = 2;
                 int c = 1;
                 int d = a + b;
+                return d;
+            }
+        "#,
+        r#"
+@main: int {
+   %v0: int = const 4
+   a: int = id %v0
+   %v1: int = const 2
+   b: int = id %v1
+   %v3: int = add a b
+   d: int = id %v3
+   ret d
+}
+"#
+    );
+
+    test_optimization_pass!(
+        can_trivially_dce_multiple_dead_stores,
+        r#"
+            int main() {
+                int a = 42;
+                int b = 313;
+                int c = 212;
+                int d = 111;
+                int e = 414;
+                int f = 515;
+                int g = 616;
+                return a;
+            }
+        "#,
+        r#"
+@main: int {
+   %v0: int = const 42
+   a: int = id %v0
+   ret a
+}
+"#
+    );
+
+    test_optimization_pass!(
+        can_trivially_dce_add_unused_result,
+        r#"
+            int main() {
+                int a = 1;
+                int b = 2;
+                int c = a + b;
+                int d = a + b;
+                return d;
+            }
+        "#,
+        r#"
+@main: int {
+   %v0: int = const 1
+   a: int = id %v0
+   %v1: int = const 2
+   b: int = id %v1
+   %v3: int = add a b
+   d: int = id %v3
+   ret d
+}
+"#
+    );
+
+    test_optimization_pass!(
+        can_trivially_dce_dead_store_and_unused_add_result,
+        r#"
+            int main() {
+                int a = 4;
+                int b = 2;
+                int c = 1;
+                int d = a + b;
+                int e = c + d;
                 return d;
             }
         "#,
@@ -238,28 +310,6 @@ mod tests {
         r#"
 @main: int {
    %v0: int = const 616
-   a: int = id %v0
-   ret a
-}
-"#
-    );
-    test_optimization_pass!(
-        can_trivially_dce_dead_blocks,
-        r#"
-            int main() {
-                int a = 42;
-                int b = 313;
-                int c = 212;
-                int d = 111;
-                int e = 414;
-                int f = 515;
-                int g = 616;
-                return a;
-            }
-        "#,
-        r#"
-@main: int {
-   %v0: int = const 42
    a: int = id %v0
    ret a
 }
