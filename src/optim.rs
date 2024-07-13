@@ -222,6 +222,28 @@ mod tests {
     );
 
     test_optimization_pass!(
+        can_trivially_dce_redundant_stores,
+        r#"
+            int main() {
+                int a = 42;
+                a = 313;
+                a = 212;
+                a = 111;
+                a = 414;
+                a = 515;
+                a = 616;
+                return a;
+            }
+        "#,
+        r#"
+@main: int {
+   %v0: int = const 616
+   a: int = id %v0
+   ret a
+}
+"#
+    );
+    test_optimization_pass!(
         can_trivially_dce_dead_blocks,
         r#"
             int main() {
