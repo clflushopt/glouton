@@ -1,9 +1,12 @@
 //! This module implements multiple transforms on the glouton IR
 //! mostly focused on scalar optimizations.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use crate::ir::{self};
+use crate::{
+    cfg::Graph,
+    ir::{self, Literal, OPCode, Symbol},
+};
 
 struct FunctionRewriter {}
 
@@ -29,32 +32,93 @@ impl Transform for Identity {
 
 /// Instruction combination pass executes over basic blocks and tries to
 /// combine instructions that can be combined into one instruction.
+///
+/// Unlike local value numbering with `InstCombine` each pass is effectively
+/// a re-write of an existing instruction or multiple instructions.
+///
+/// This implementation is mainly inspired by the way LLVM does it and contains
+/// a strength reduction pass for some popular algebraic simplification.
 struct InstCombine {}
 
 impl Transform for InstCombine {}
 
-/// Constant folding and propagation pass targets expressions that can be
-/// evaluated at compile time and replaces them with the evaluation, once
-/// constants are folded a second sub-pass executes to propagate constants
-/// to their usage locations.
-struct ConstantFold {}
-
-impl ConstantFold {}
-
-impl Transform for ConstantFold {}
-
-/// Common subexpression elimination pass replaces common subexpressions in
-/// a basic block by their previously computed values. The pass will in most
-/// cases introduce a new temporary storage location for the subexpression
-/// before replacing its uses with the new variable.
-struct CSE {}
-
-impl Transform for CSE {}
-
-/// Local Value Number implementation.
+/// Local Value Numbering pass builds a value numbering table that is then
+/// re-used in several local optimizations such as dead code elimination
+/// copy propagation, constant folding and common subexpression elimination.
 struct LVN {}
 
-impl LVN {}
+impl LVN {
+    /// Run the local value numbering pass to build the value numbering table
+    /// then iteratively run peephole optimizations on using the table.
+    fn run(&self, function: &mut ir::Function) {
+        // First step when constructing the LVN is to form basic blocks
+        // for the input function.
+        let worklist = Graph::form_basic_blocks(function);
+
+        // The data structures used for LVN :
+        // 1. Hashmap from variable names to value numbers.
+        // 2. Hashmap from encoded instructions to their canonical variable names.
+        //
+        // Encoding instructions :
+        //
+        // match Inst(Args..) => Inst(VN#) where VN# are value numbers.
+        //
+        // ValueNumber act as row numbers in our value numbering table.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        struct ValueNumber(usize);
+
+        // Value is how we encode the instruction to their tuples.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        struct Value(OPCode, ValueNumber, ValueNumber);
+
+        #[derive(Debug, Clone)]
+        struct NumberingTable {
+            table: HashMap<ir::Symbol, ValueNumber>,
+            vn: ValueNumber,
+        }
+
+        impl Value {
+            fn from(inst: &ir::Instruction) {
+                match inst {
+                    _ => todo!(),
+                }
+            }
+        }
+
+        // Environment maps variable names to value numbers.
+        //
+        // TODO: Should potentially live nicely with declarations out of the
+        // current scope and variable arguments.
+        // var2num
+        let environment: HashMap<Symbol, ValueNumber> = HashMap::new();
+        // value2number
+        let value_table: HashMap<Value, ValueNumber> = HashMap::new();
+        // num2vars
+        let variables: HashMap<ValueNumber, Symbol> = HashMap::new();
+        // num2const
+        let constants: HashMap<ValueNumber, Literal> = HashMap::new();
+
+        let encode_instruction = |inst: &ir::Instruction| -> Value {
+            match inst {
+                _ => todo!(),
+            }
+        };
+
+        type SludgedValueNumber = usize;
+    }
+
+    /// Common subexpression elimination pass replaces common subexpressions in
+    /// a basic block by their previously computed values. The pass will in most
+    /// cases introduce a new temporary storage location for the subexpression
+    /// before replacing its uses with the new variable.
+    fn cse(&self) {}
+
+    /// Constant folding and propagation pass targets expressions that can be
+    /// evaluated at compile time and replaces them with the evaluation, once
+    /// constants are folded a second sub-pass executes to propagate constants
+    /// to their usage locations.
+    fn fold(&self) {}
+}
 
 /// Dead code elimination pass eliminates unused and unreachable instructions.
 ///

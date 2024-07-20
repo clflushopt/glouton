@@ -1081,9 +1081,53 @@ int ifelses(int x,int y,int z) {
         "#
     );
 
+    /*    test_semantic_analyzer!(
+            can_deal_with_declarations_in_if_else_scopes,
+            r#"
+    int main() {
+        int a = 4;
+        int b = 2;
+        int c = 0;
+        if (a < b) {
+            int c = a + b;
+        } else {
+            int d = a - b;
+        }
+        return c;
+    }
+    "#
+        );*/
+
     test_semantic_analyzer!(
         can_find_duplicate_redefinition,
         "int main() {} int main() {}"
+    );
+
+    test_decl_analyzer!(
+        can_handle_more_if_else_declarations_decl,
+        r#"
+        int main() {
+            int a = 42;
+            int b = 17;
+            if (a > b) {
+                return a - b;
+            }
+            return a + b;
+        }
+        "#
+    );
+    test_semantic_analyzer!(
+        can_handle_more_if_else_declarations,
+        r#"
+        int main() {
+            int a = 42;
+            int b = 17;
+            if (a > b) {
+                return a - b;
+            }
+            return a + b;
+        }
+        "#
     );
 
     test_semantic_analyzer!(
@@ -1109,11 +1153,23 @@ int ifelses(int x,int y,int z) {
     );
     test_semantic_analyzer!(
         can_find_invalid_call_expressions,
-        "int f(int a, int b) { return a + b;} int main() { int x = f(true, false); }"
+        "int f(int a, int b) {
+            return a + b;
+        }
+        int main() {
+            int x = f(true, false); 
+        }"
     );
     test_semantic_analyzer!(
         can_find_invalid_call_expressions_in_nested_scope,
-        "int f(int a, int b) { return a + b; } int main() { { f(false, true); } }"
+        "int f(int a, int b) {
+            return a + b; 
+        }
+        int main() {
+            {
+                f(false, true);
+            }
+        }"
     );
     test_semantic_analyzer!(
         can_find_invalid_for_statement_with_non_assignment_as_iteration,
