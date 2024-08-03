@@ -227,7 +227,7 @@ mod tests {
                 let symbol_table = analyze(parser.ast());
 
                 let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
-                irgen.gen();
+                irgen.build();
                 let mut graph = Graph::new(irgen.functions());
                 graph.assign_labels_to_blocks();
                 // Compute successors.

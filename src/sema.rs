@@ -7,7 +7,7 @@
 //!
 //! This implementation of semantic analysis mostly focuses on type correctness
 //! and general soundness. Reachability analysis is currently not implemented.
-use std::{collections::HashMap, fmt};
+use std::{borrow::BorrowMut, collections::HashMap, fmt};
 
 use crate::ast::{self, Decl, DeclType, Expr, Ref, Stmt};
 
@@ -19,7 +19,7 @@ enum Scope {
 }
 
 /// Symbols bind names from declarations and identifiers to attributes such as
-/// type or ordinal position in the declaration stack.
+/// the type and ordinal position in the declaration stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Symbol {
     LocalVariable {
@@ -46,16 +46,16 @@ impl fmt::Display for Symbol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
             Self::LocalVariable { name, t, position } => {
-                write!(f, "LOCAL({}): {} @ {position}", name, t)
+                writeln!(f, "LOCAL({}): {} @ {position}", name, t)
             }
             Self::GlobalVariable { name, t } => {
-                write!(f, "GLOBAL({}): {}", name, t)
+                writeln!(f, "GLOBAL({}): {}", name, t)
             }
             Self::FunctionArgument { name, t } => {
-                write!(f, "ARG({}): {}", name, t)
+                writeln!(f, "ARG({}): {}", name, t)
             }
             Self::FunctionDefinition { name, t, .. } => {
-                write!(f, "FUNCTION({}): {}", name, t)
+                writeln!(f, "FUNCTION({}): {}", name, t)
             }
         }
     }
@@ -73,6 +73,65 @@ impl Symbol {
     }
 }
 
+/// GlobalScopeTable is the symbol table used for tracking declarations in the
+/// global scope.
+#[derive(Debug, Clone)]
+pub struct GlobalScopeTable {
+    table: HashMap<String, Symbol>,
+}
+
+impl GlobalScopeTable {
+    fn new() -> Self {
+        Self {
+            table: HashMap::new(),
+        }
+    }
+
+    fn bind(&mut self, name: &str, symbol: Symbol) {
+        match self.table.insert(name.to_string(), symbol) {
+            Some(_) => panic!(
+                "identifier: '{name}' is already bound in the global scope"
+            ),
+            None => (),
+        }
+    }
+
+    fn lookup(&self, name: &str) -> Option<&Symbol> {
+        self.table.get(name)
+    }
+}
+
+/// LocalScopeTable is the symbol table used for tracking declarations in any
+/// local scope. Each table points to a child and parent tables; chaining is
+/// used for forwards and backwards symbol resolution.
+#[derive(Debug, Clone)]
+pub struct LocalScopeTable {
+    table: HashMap<String, Symbol>,
+    parent: usize,
+}
+
+impl LocalScopeTable {
+    fn new(parent: usize) -> Self {
+        Self {
+            table: HashMap::new(),
+            parent,
+        }
+    }
+
+    fn bind(&mut self, name: &str, symbol: Symbol) {
+        match self.table.insert(name.to_string(), symbol) {
+            Some(_) => panic!(
+                "identifier: '{name}' is already bound in the current scope"
+            ),
+            None => (),
+        }
+    }
+
+    fn lookup(&self, name: &str) -> Option<&Symbol> {
+        self.table.get(name)
+    }
+}
+
 /// The symbol table is responsible for tracking all declarations in effect
 /// when a reference to a symbol is encountered. It's built by walking the AST
 /// and recording all variable and function declarations.
@@ -80,27 +139,25 @@ impl Symbol {
 /// `SymbolTable` is implemented as a stack of hash maps, a stack pointer is
 /// always pointing to a `HashMap` that holds all declarations within a scope
 /// when entering or leaving a scope the stack pointer is changed.
-///
-/// In order to simplify most operations we use three stack pointers, a root
-/// stack pointer which is immutable and points to the global scope, a pointer
-/// to the current scope and a pointer to the parent of the current scope.
 #[derive(Debug, Clone)]
 pub struct SymbolTable {
-    // Stack pointer to the global scope.
-    root: usize,
     // Stack pointer to the current scope.
     current: usize,
-    // Stack pointer to the parent of the current scope.
-    parent: usize,
-    // Symbol tables.
-    tables: Vec<HashMap<String, Symbol>>,
+    // Global scope table.
+    global: GlobalScopeTable,
+    // Chain of symbol tables.
+    tables: Vec<LocalScopeTable>,
 }
 
 impl fmt::Display for SymbolTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (scope, table) in self.tables.iter().enumerate() {
-            for (name, symbol) in table {
-                writeln!(f, "{scope}: {name} @ {symbol}").unwrap();
+        for (name, symbol) in &self.global.table {
+            writeln!(f, "GLOBAL: {name} @ {symbol}")?
+        }
+
+        for (level, table) in self.tables.iter().enumerate() {
+            for (name, symbol) in &table.table {
+                writeln!(f, "LOCAL {level}: {name} @ {symbol}")?
             }
         }
         Ok(())
@@ -111,55 +168,55 @@ impl SymbolTable {
     /// Create a new symbol table instance.
     fn new() -> Self {
         Self {
-            root: 0,
             current: 0,
-            parent: 0,
-            tables: vec![HashMap::new()],
+            global: GlobalScopeTable::new(),
+            tables: vec![
+                // The table at index 0 is a dummy table used to simplify index
+                // processing
+                LocalScopeTable::new(0),
+            ],
         }
     }
 
-    // Find a symbol by starting from the given index, the index should be in
-    // the range of symbol tables stack.
+    // Find a symbol starting from a given stack pointer, once the local scope
+    // tables are exhausted lookup the symbol in the global scope as a last
+    // resort.
     pub fn find(&self, name: &str, start: usize) -> Option<&Symbol> {
-        // Get a reference to the current scope we're processing
-        let mut idx = if start >= self.tables.len() {
-            // Should be unreacheable ?
-            self.tables.len() - 1
-        } else {
-            start
-        };
-        let mut current_scope_table = &self.tables[idx];
-        while idx >= self.root {
-            // Try and find the declaration in the current scope.
-            for (ident, symbol) in current_scope_table {
-                if ident == name {
-                    return Some(symbol);
-                }
+        // Initially starting from `start` iterate over the local scope chain.
+        let mut idx = start;
+        if idx >= self.tables.len() {
+            idx = self.tables.len() - 1;
+        }
+
+        while idx > 0 {
+            let current_scope_table = &self.tables[idx];
+            if let Some(symbol) = current_scope_table.lookup(name) {
+                return Some(symbol);
             }
-            // If we didn't find the declaration in the current scope
-            // we check the parent.
-            match idx.checked_sub(1) {
-                Some(idx) => current_scope_table = &self.tables[idx],
-                None => break,
-            }
+
             idx -= 1
         }
-        None
+
+        // The last fallback is the global table.
+        self.global.lookup(name)
     }
 
-    // Bind a new symbol to the current scope.
+    // Find a symbol in the global scope table.
+    pub fn global(&self, name: &str) -> Option<&Symbol> {
+        self.global.lookup(name)
+    }
+
+    // Bind a new symbol to the innermost scope.
     //
     // # Panics
+    //
     // When `name` is already bound, binding fails.
-    fn bind(&mut self, name: &str, sym: Symbol) {
-        let tbl = &mut self.tables[self.current];
-        match tbl.get(name) {
-            Some(_) => {
-                unreachable!("Name {name} is already bound to {sym}")
+    fn bind(&mut self, name: &str, symbol: Symbol, scope: Scope) {
+        match scope {
+            Scope::Local => {
+                self.tables[self.current].borrow_mut().bind(name, symbol)
             }
-            None => {
-                tbl.insert(name.to_string(), sym);
-            }
+            Scope::Global => self.global.bind(name, symbol),
         }
     }
 
@@ -178,34 +235,34 @@ impl SymbolTable {
         let mut idx = self.current;
         // The global scope is at index 0
         while idx > 0 {
-            sym_count += self.tables[idx].len();
+            sym_count += self.tables[idx].table.len();
             idx -= 1;
         }
 
         sym_count
     }
 
-    // Entering a new scope pushes a new symbol table into the stack.
+    // Entering a new scope pushes a new scope into the stack.
     fn enter(&mut self) {
-        let table = HashMap::new();
-        self.tables.push(table);
-        self.parent = self.current;
-        self.current = self.tables.len() - 1;
+        // Get a reference to the parent scope.
+        let parent = self.current;
+        // Build a new scope.
+        let scope = LocalScopeTable::new(parent);
+        // Push it into the stack.
+        self.tables.push(scope);
+        // Update the stack pointer.
         self.current = self.tables.len() - 1;
     }
 
     // Leave the current scope returning the parent.
     fn exit(&mut self) {
-        self.current = self.parent;
-        if self.parent > 0 {
-            self.parent -= 1;
-        }
+        let parent = self.tables[self.current].parent;
+        self.current = parent;
     }
 }
 
-/// Declaration analyzer is a specialized visitor invoked for processing
-/// declarations. It is responsible for building the symbol table information
-/// corresponding to variable name, function names, types...
+/// Declaration analysis pass is a specialized visitor invoked for processing
+/// declarations such as functions, global variables, local variables, types...
 pub struct DeclAnalyzer<'a> {
     // AST to analyze.
     ast: &'a ast::AST,
@@ -221,16 +278,6 @@ impl<'a> DeclAnalyzer<'a> {
             table: SymbolTable::new(),
         }
     }
-
-    /// Return whether we are in a local or global scope.
-    #[must_use]
-    const fn scope(&self) -> Scope {
-        match self.table.scope() {
-            0 => Scope::Global,
-            _ => Scope::Local,
-        }
-    }
-
     /// Return an immutable view to the symbol table.
     const fn symbol_table(&self) -> &SymbolTable {
         &self.table
@@ -239,37 +286,23 @@ impl<'a> DeclAnalyzer<'a> {
     /// Define a local binding.
     fn define_local_binding(&mut self, stmt: &ast::Stmt) {
         match stmt {
-            Stmt::LocalVar {
+            Stmt::LocalVariable {
                 decl_type, name, ..
             } => {
                 // TODO: Ensure r-value type matches l-value declared type.
-                let symbol = match self.scope() {
-                    Scope::Local => {
-                        let position = self.table.stack_position();
-                        Symbol::LocalVariable {
-                            name: name.clone(),
-                            t: *decl_type,
-                            position,
-                        }
-                    }
-                    Scope::Global => Symbol::GlobalVariable {
-                        name: name.clone(),
-                        t: *decl_type,
-                    },
+                let symbol = Symbol::LocalVariable {
+                    name: name.clone(),
+                    t: *decl_type,
+                    position: self.table.stack_position(),
                 };
-                self.table.bind(name, symbol)
+                self.table.bind(name, symbol, Scope::Local)
             }
-            Stmt::FuncArg { decl_type, name } => {
-                let symbol = match self.scope() {
-                    Scope::Local => Symbol::FunctionArgument {
-                        name: name.clone(),
-                        t: *decl_type,
-                    },
-                    Scope::Global => unreachable!(
-                        "Function arguments must be in a local scope"
-                    ),
+            Stmt::Argument { decl_type, name } => {
+                let symbol = Symbol::FunctionArgument {
+                    name: name.clone(),
+                    t: *decl_type,
                 };
-                self.table.bind(name, symbol)
+                self.table.bind(name, symbol, Scope::Local)
             }
             _ => unreachable!("unexpected binding : {:?}", stmt),
         }
@@ -284,43 +317,33 @@ impl<'a> DeclAnalyzer<'a> {
                 args,
                 ..
             } => {
-                match self.scope() {
-                    Scope::Local => {
-                        unreachable!("function declarations are not allowed in a local scope")
-                    }
-                    Scope::Global => {
-                        let args = args
+                let args = args
                             .iter()
                             .map(|arg_ref| match self.ast.get_stmt(*arg_ref) {
-                                Some(Stmt::FuncArg { decl_type, .. }) => *decl_type,
+                                Some(Stmt::Argument { decl_type, .. }) => *decl_type,
                                 stmt => unreachable!(
-                                    "Expected statement of kind `Stmt::FuncArg` got {:?}",
+                                    "Expected statement of kind `Stmt::Argument` got {:?}",
                                     stmt
                                 ),
                             })
                             .collect();
-                        // Bind the function definition.
-                        let func_symbol = Symbol::FunctionDefinition {
-                            name: name.clone(),
-                            t: *return_type,
-                            args,
-                        };
-                        self.table.bind(name, func_symbol);
-                    }
-                }
+                // Bind the function definition.
+                let symbol = Symbol::FunctionDefinition {
+                    name: name.clone(),
+                    t: *return_type,
+                    args,
+                };
+                self.table.bind(name, symbol, Scope::Global);
             }
-            Decl::GlobalVar {
+            Decl::GlobalVariable {
                 decl_type, name, ..
             } => {
                 // TODO: Ensure r-value type matches l-value declared type.
-                let symbol = match self.scope() {
-                    Scope::Global => Symbol::GlobalVariable {
-                        name: name.clone(),
-                        t: *decl_type,
-                    },
-                    _ => unreachable!("unexpected state: trying to define global variable in local scope {:?} @ {:?}", decl, self.scope())
+                let symbol = Symbol::GlobalVariable {
+                    name: name.clone(),
+                    t: *decl_type,
                 };
-                self.table.bind(name, symbol)
+                self.table.bind(name, symbol, Scope::Global)
             }
         }
     }
@@ -369,7 +392,7 @@ impl<'a> ast::Visitor<()> for DeclAnalyzer<'a> {
                 // Exit the function scope.
                 self.table.exit();
             }
-            global_var @ Decl::GlobalVar { .. } => {
+            global_var @ Decl::GlobalVariable { .. } => {
                 self.define_global_binding(global_var)
             }
         }
@@ -378,7 +401,7 @@ impl<'a> ast::Visitor<()> for DeclAnalyzer<'a> {
 
     fn visit_stmt(&mut self, stmt: &Stmt) {
         match stmt {
-            decl @ (Stmt::LocalVar { .. } | Stmt::FuncArg { .. }) => {
+            decl @ (Stmt::LocalVariable { .. } | Stmt::Argument { .. }) => {
                 self.define_local_binding(decl)
             }
             Stmt::Block(body) => {
@@ -420,18 +443,15 @@ impl<'a> ast::Visitor<()> for DeclAnalyzer<'a> {
     }
 }
 
-/// Semantics analyzer walks the AST and uses the pre-built synmbol table
-/// to validate the semantic correctness of the input program.
-///
-/// It tries to enforce the same semantic correctness that is expected of C0
-/// programs, the following is a list of rules it tries to enforce :
+/// Semantic analysis pass walks the AST and uses the previously built synmbol
+/// table to validate the semantic correctness of the compilation unit.
 ///
 /// - Identifiers resolve to valid symbols in the AST.
 /// - Identifiers can't be re-used within the same block (impacts declarations)
 /// - Functions can only be declared in the global scope.
 /// - Function calls have the correct number and type of their arguments.
 /// - Functions must end with a `return` statement unless they have type `void`
-/// - L-values assignments are valid targets of R-values and of the same type.
+/// - l-value assignments are valid targets of r-values and of the same type.
 struct SemanticAnalyzer<'a> {
     ast: &'a ast::AST,
     symbol_table: &'a SymbolTable,
@@ -449,8 +469,11 @@ impl<'a> SemanticAnalyzer<'a> {
 
     /// Lookup an existing binding by name, returns a `Symbol`
     /// if one is found otherwise none.
-    fn lookup(&self, name: &str) -> Option<&Symbol> {
-        self.symbol_table.find(name, self.current_scope)
+    fn lookup(&self, name: &str, scope: Scope) -> Option<&Symbol> {
+        match scope {
+            Scope::Global => self.symbol_table.global(name),
+            Scope::Local => self.symbol_table.find(name, self.current_scope),
+        }
     }
     /// Enter a new scope by increment the current scope pointer.
     fn enter_scope(&mut self) {
@@ -459,9 +482,7 @@ impl<'a> SemanticAnalyzer<'a> {
 
     /// Exit the current scope, decrementing the current scope pointer.
     fn exit_scope(&mut self) {
-        if self.current_scope > 0 {
-            self.current_scope -= 1
-        }
+        self.current_scope -= 1
     }
 
     /// Resolve an expression's type.
@@ -474,10 +495,16 @@ impl<'a> SemanticAnalyzer<'a> {
     pub fn resolve(&self, expr: &ast::Expr) -> DeclType {
         match expr {
             ast::Expr::Named(name) => {
-                match self.lookup(name) {
-                Some(sym) => sym.t(),
-                None => panic!("Identifer {name} was not found, ensure it is declared before use."),
-            }
+                let scope = if self.current_scope > 0 {
+                    Scope::Local
+                } else {
+                    Scope::Global
+                };
+
+                match self.lookup(name, scope) {
+                    Some(sym) => sym.t(),
+                    None => panic!("Identifer {name} was not found, ensure it is declared before use."),
+                }
             }
             ast::Expr::Call {
                 name: name_ref,
@@ -489,25 +516,26 @@ impl<'a> SemanticAnalyzer<'a> {
                         "Expected call expression to reference `NamedExpr`"
                     ),
                 };
-                match self.lookup(name) {
+                // Functions are defined in the global scope.
+                match self.lookup(name, Scope::Global) {
                     Some(Symbol::FunctionDefinition {
                         name,
-                        args: func_args,
+                        args: params,
                         t,
                     }) => {
                         // Ensure the `Call` expression uses the correct
                         // number of arguments.
                         assert_eq!(
                             args.len(),
-                            func_args.len(),
+                            params.len(),
                             "Expected function `{name}` to have {} arguments got {} in call.",
-                            func_args.len(),
+                            params.len(),
                             args.len()
                         );
                         // Iterate of the function definition arguments and
                         // the call expression references and ensure they
                         // are of the same type.
-                        for (arg_ref, symbol_t) in args.iter().zip(func_args) {
+                        for (arg_ref, symbol_t) in args.iter().zip(params) {
                             if let Some(expr) = self.ast.get_expr(*arg_ref) {
                                 let expr_t = self.resolve(expr);
                                 assert_eq!(*symbol_t, expr_t, "Expected function `{name}` call argument to be of the same type")
@@ -521,7 +549,7 @@ impl<'a> SemanticAnalyzer<'a> {
                         *t
                     }
                     _ => unreachable!(
-                        "Call expression is only allowed for functions."
+                        "Identifier '{name}' is not a function, call expression is only allowed for functions."
                     ),
                 }
             }
@@ -547,7 +575,12 @@ impl<'a> SemanticAnalyzer<'a> {
                     // Must be a named expression and the named identifier must
                     // resolve to a valid symbol.
                     Some(ast::Expr::Named(identifier)) => {
-                        if let Some(symbol) = self.lookup(identifier) {
+                        let scope = if self.current_scope > 0 {
+                            Scope::Local
+                        } else {
+                            Scope::Global
+                        };
+                        if let Some(symbol) = self.lookup(identifier, scope) {
                             match symbol {
                                 Symbol::FunctionDefinition { .. } => {
                                     unreachable!("Can't assign to function.")
@@ -681,7 +714,7 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
 
     fn visit_stmt(&mut self, stmt: &Stmt) {
         match stmt {
-            ast::Stmt::LocalVar {
+            ast::Stmt::LocalVariable {
                 decl_type,
                 name,
                 value,
@@ -854,7 +887,7 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
 
     fn visit_decl(&mut self, decl: &Decl) {
         match decl {
-            ast::Decl::GlobalVar {
+            ast::Decl::GlobalVariable {
                 decl_type, value, ..
             } => {
                 if let Some(assignee) = self.ast.get_expr(*value) {
@@ -914,10 +947,10 @@ impl<'a> ast::Visitor<()> for SemanticAnalyzer<'a> {
 pub fn analyze(ast: &ast::AST) -> SymbolTable {
     let mut decl_analyzer = DeclAnalyzer::new(ast);
     ast::walk(ast, &mut decl_analyzer);
-    let symbol_table = decl_analyzer.symbol_table();
-    let mut semantic_analyzer = SemanticAnalyzer::new(ast, symbol_table);
+    let mut semantic_analyzer =
+        SemanticAnalyzer::new(ast, decl_analyzer.symbol_table());
     ast::walk(ast, &mut semantic_analyzer);
-    symbol_table.clone()
+    decl_analyzer.symbol_table().clone()
 }
 
 #[cfg(test)]
@@ -961,6 +994,8 @@ mod tests {
 
                 let mut decl_analyzer = DeclAnalyzer::new(parser.ast());
                 let symbol_table = decl_analyzer.analyze();
+
+                println!("Symbol table: {}", symbol_table);
                 let mut semantic_analyzer =
                     SemanticAnalyzer::new(parser.ast(), symbol_table);
 
@@ -1014,6 +1049,68 @@ int scopes(int x,int y,int z) {
      }
     return x+y+z;
 }
+        "#
+    );
+
+    test_decl_analyzer!(
+        can_process_deeply_nested_conditional_blocks,
+        r#"
+        int a(int a, int b) {
+            if (a > b) {
+                return a + b;
+            } if (a < b) {
+                return a- b; 
+            } else {
+                return 0; 
+            }
+            return -1;
+        }
+        
+        int b(int a, int b) {
+            if (a > b) {
+                return a + b;
+            } if (a < b) {
+                return a- b; 
+            } else {
+                return 0; 
+            }
+            return -1;
+        }
+        "#
+    );
+
+    test_decl_analyzer!(
+        can_process_deeply_nested_scopes,
+        r#"
+        int a(int a, int b) {
+            if (a > b) {
+                return a + b;
+            } if (a < b) {
+                return a- b; 
+            } else {
+                return 0; 
+            }
+            return -1;
+        }
+        
+        int b(int a, int b) {
+            if (a > b) {
+                return a + b;
+            } if (a < b) {
+                return a- b; 
+            } else {
+                return 0; 
+            }
+            return -1;
+        }
+
+        int main() {
+            int a = 0;
+            int b = 1;
+            if (a > b) {
+                return a(a,b);
+            }
+        }
         "#
     );
 
@@ -1081,28 +1178,6 @@ int ifelses(int x,int y,int z) {
         "#
     );
 
-    /*    test_semantic_analyzer!(
-            can_deal_with_declarations_in_if_else_scopes,
-            r#"
-    int main() {
-        int a = 4;
-        int b = 2;
-        int c = 0;
-        if (a < b) {
-            int c = a + b;
-        } else {
-            int d = a - b;
-        }
-        return c;
-    }
-    "#
-        );*/
-
-    test_semantic_analyzer!(
-        can_find_duplicate_redefinition,
-        "int main() {} int main() {}"
-    );
-
     test_decl_analyzer!(
         can_handle_more_if_else_declarations_decl,
         r#"
@@ -1116,16 +1191,77 @@ int ifelses(int x,int y,int z) {
         }
         "#
     );
+
+    test_semantic_analyzer!(
+        can_deal_with_deeply_nested_scopes,
+        r#"
+        int main() {
+            int a = 4;
+            int b = 4;
+            int c = 4;
+            {
+                int a = 0;
+                int b = 0;
+                int c = 0;
+                {
+                    int a = 1;
+                    int b = 1;
+                    int c = 1;
+                }
+                {
+                    int a = 2;
+                    int b = 2;
+                    int c = 2;
+                    {
+                        int a = 3;
+                        int b = 3;
+                        int c = 3;
+                    }
+                    int a = 2;
+                    int b = 2;
+                    int c = 2;
+                }
+            }
+        }
+        "#
+    );
+
+    test_semantic_analyzer!(
+        can_deal_with_declarations_in_if_else_scopes,
+        r#"
+    int main() {
+        int a = 4;
+        int b = 2;
+        int c = 0;
+        if (a < b) {
+            int c = a + b;
+            int c = a - b;
+        } else {
+            int d = a - b;
+        }
+        return c;
+    }
+    "#
+    );
+
+    test_semantic_analyzer!(
+        can_find_duplicate_redefinition,
+        "int main() {} int main() {}"
+    );
+
     test_semantic_analyzer!(
         can_handle_more_if_else_declarations,
         r#"
         int main() {
             int a = 42;
             int b = 17;
+            int c = 0;
             if (a > b) {
-                return a - b;
+                int c = a - b;
+                return c;
             }
-            return a + b;
+            int c = a + b;
+            return c;
         }
         "#
     );

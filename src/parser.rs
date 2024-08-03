@@ -129,7 +129,7 @@ impl Parser {
                 let assigned = decl_type.default_value();
                 let assigned_ref = self.ast.push_expr(assigned);
                 // Declaration without an assignment.
-                Stmt::LocalVar {
+                Stmt::LocalVariable {
                     decl_type,
                     name: identifier,
                     value: assigned_ref,
@@ -140,7 +140,7 @@ impl Parser {
                 self.eat(&Token::Equal);
                 let assigned = self.expression();
                 self.eat(&Token::SemiColon);
-                Stmt::LocalVar {
+                Stmt::LocalVariable {
                     decl_type,
                     name: identifier,
                     value: assigned,
@@ -173,7 +173,7 @@ impl Parser {
                 let assigned = decl_type.default_value();
                 let assigned_ref = self.ast.push_expr(assigned);
                 // Declaration without an assignment.
-                Decl::GlobalVar {
+                Decl::GlobalVariable {
                     decl_type,
                     name: identifier,
                     value: assigned_ref,
@@ -184,7 +184,7 @@ impl Parser {
                 self.eat(&Token::Equal);
                 let assigned = self.expression();
                 self.eat(&Token::SemiColon);
-                Decl::GlobalVar {
+                Decl::GlobalVariable {
                     decl_type,
                     name: identifier,
                     value: assigned,
@@ -239,7 +239,7 @@ impl Parser {
                     }
                 };
 
-                let arg = Stmt::FuncArg {
+                let arg = Stmt::Argument {
                     decl_type: arg_type,
                     name: arg_name,
                 };

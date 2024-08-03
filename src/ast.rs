@@ -338,13 +338,13 @@ pub enum Stmt {
     // Return statements.
     Return(ExprRef),
     // Variable declarations.
-    LocalVar {
+    LocalVariable {
         decl_type: DeclType,
         name: String,
         value: ExprRef,
     },
     // Function arguments.
-    FuncArg {
+    Argument {
         decl_type: DeclType,
         name: String,
     },
@@ -378,7 +378,7 @@ pub enum Stmt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decl {
     // Global variable declarations.
-    GlobalVar {
+    GlobalVariable {
         decl_type: DeclType,
         name: String,
         value: ExprRef,
@@ -677,7 +677,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 || unreachable!("Return statement is missing expression ref"),
                 |expr| format!("Return({})", self.visit_expr(expr)),
             ),
-            Stmt::LocalVar {
+            Stmt::LocalVariable {
                 decl_type,
                 name,
                 value,
@@ -708,7 +708,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                 s += "}";
                 s
             }
-            Stmt::FuncArg { decl_type, name } => {
+            Stmt::Argument { decl_type, name } => {
                 format!("ARG({decl_type}, {name})")
             }
             Stmt::If {
@@ -812,7 +812,7 @@ impl<'a> Visitor<String> for ASTDisplayer<'a> {
                     self.visit_stmt(body)
                 )
             }
-            Decl::GlobalVar {
+            Decl::GlobalVariable {
                 decl_type,
                 name,
                 value,

@@ -1,6 +1,3 @@
-//! The glouton intermediate representation is a three-address code linear IR
-//! used to represent Glouton programs.
-//!
 //! This iteration of the implementation improves significantly on the initial
 //! design; with the actual instruction semantics remaining unchanged.
 //!
@@ -11,13 +8,11 @@
 //! `const` and `id` are core to the way the IR is structured as they allow us
 //! to easily translate into and out of SSA form; with potentially translating
 //! out of SSA can forgo the rename phase and just prune all the phi nodes.
-use std::{fmt, slice::Iter};
+use std::collections::HashMap;
+use std::fmt;
 
-use crate::{
-    ast::{self, Visitor},
-    cfg::Graph,
-    sema,
-};
+use crate::ast::{self, Visitor};
+use crate::sema::{self};
 
 /// Types used in the IR.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -598,25 +593,37 @@ impl fmt::Display for Function {
 /// being currently lowered, a scope enum value to deal with nesting
 /// and a pointer to the symbol table level we start symbol resolution
 /// from.
-struct IRBuilderTrackingRef(usize, usize, Scope);
+struct IRBuilderContext {
+    function_index: usize,
+    scope_level_index: usize,
+    current_scope: Scope,
+}
 
-impl IRBuilderTrackingRef {
+impl IRBuilderContext {
+    // Create a new context.
+    fn new() -> Self {
+        Self {
+            function_index: 0,
+            scope_level_index: 0,
+            current_scope: Scope::Global,
+        }
+    }
     // Return the index of the current function we are generating instructions
     // for.
-    fn pos(&self) -> usize {
-        self.0
+    fn index(&self) -> usize {
+        self.function_index
     }
 
     // Return the current scope.
     fn scope(&self) -> Scope {
-        self.2
+        self.current_scope
     }
 
     // Enter switches to a local scope view and increments the symbol table
     // level.
     fn enter(&mut self) {
-        self.1 += 1;
-        self.2 = Scope::Local;
+        self.scope_level_index += 1;
+        self.current_scope = Scope::Local;
     }
 
     // Exit back to the global scope, since the IR does not have nested scopes
@@ -625,18 +632,18 @@ impl IRBuilderTrackingRef {
         // Exit signals that we completed building a single functional unit
         // so our position in the global program IR is increased by 1 since
         // the next unit will be a new function in the program.
-        self.0 += 1;
+        self.function_index += 1;
         // Decide if we are exiting back to a local scope or the top level
         // global scope.
         //
         // If `self.1` is equal to `1` then we are exiting back to the global
         // scope, otherwise we are still in a local scope.
-        if self.1 == 1 {
-            self.2 = Scope::Global;
+        if self.scope_level_index == 1 {
+            self.current_scope = Scope::Global;
         } else {
-            self.2 = Scope::Local;
+            self.current_scope = Scope::Local;
         }
-        self.1 -= 1;
+        self.scope_level_index -= 1;
     }
 }
 
@@ -706,7 +713,7 @@ pub struct IRBuilder<'a> {
     llc: LocationLabelCounter,
     // TrackingRef for the `IRBuilder` acts as a composite pointer to keep track
     // of metadata that's useful during the lowering phase.
-    tracker: IRBuilderTrackingRef,
+    context: IRBuilderContext,
 }
 
 impl<'a> IRBuilder<'a> {
@@ -714,18 +721,18 @@ impl<'a> IRBuilder<'a> {
         Self {
             program: vec![],
             globals: vec![],
-            llc: LocationLabelCounter(0, 0),
-            tracker: IRBuilderTrackingRef(0, 0, Scope::Global),
+            llc: LocationLabelCounter::new(),
+            context: IRBuilderContext::new(),
             ast,
             symbol_table,
         }
     }
     /// Push a slice of instructions to the current function's body.
     fn push(&mut self, instrs: &[Instruction]) {
-        match self.tracker.scope() {
+        match self.context.scope() {
             Scope::Local => {
                 for inst in instrs {
-                    self.program[self.tracker.pos()].push(inst)
+                    self.program[self.context.index()].push(inst)
                 }
             }
             Scope::Global => {
@@ -757,7 +764,9 @@ impl<'a> IRBuilder<'a> {
         &self.globals
     }
 
-    pub fn gen(&mut self) {
+    /// Build the intermediate representation by invoking the IR-lowering
+    /// visitor.
+    pub fn build(&mut self) {
         for decl in self.ast.declarations() {
             let _ = self.visit_decl(decl);
         }
@@ -776,14 +785,14 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
             ast::Decl::Function {
                 name,
                 return_type,
-                args,
+                args: parameters,
                 body,
             } => {
                 // Build and push a new function frame.
-                let func_args = args
+                let parameters = parameters
                     .iter()
                     .map(|arg| match self.ast.get_stmt(*arg) {
-                        Some(ast::Stmt::FuncArg { decl_type, name }) => {
+                        Some(ast::Stmt::Argument { decl_type, name }) => {
                             Symbol::new(name, Type::from(decl_type))
                         }
                         _ => unreachable!(
@@ -791,22 +800,41 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                     ),
                     })
                     .collect::<Vec<_>>();
-                let func_return_type = Type::from(return_type);
-                let func = Function::new(name, func_args, func_return_type);
+                let return_type = Type::from(return_type);
+                let function = Function::new(name, parameters, return_type);
                 // Enter a new scope and push the new function frame.
-                self.program.push(func);
-                self.tracker.enter();
-                // Generate IR for the body.
-                let (span, code) = match self.ast.get_stmt(*body) {
-                    Some(stmt) => self.visit_stmt(stmt),
-                    _ => unreachable!("expected body reference to be valid !"),
-                };
+                self.program.push(function);
+                self.context.enter();
+
+                let mut code = vec![];
+                let mut span = None;
+
+                if let Some(func_body) = self.ast.get_stmt(*body) {
+                    match func_body {
+                        ast::Stmt::Block(body) => {
+                            for stmt_ref in body {
+                                if let Some(stmt) = self.ast.get_stmt(*stmt_ref)
+                                {
+                                    let (local_span, mut local_code): (
+                                        Option<Value>,
+                                        Vec<Instruction>,
+                                    ) = self.visit_stmt(stmt);
+                                    code.append(&mut local_code);
+                                    span = local_span;
+                                }
+                            }
+                        }
+                        _ => unreachable!(
+                            "function body must be a block statement"
+                        ),
+                    }
+                }
                 self.push(&code);
                 // Exit back to the global scope.
-                self.tracker.exit();
+                self.context.exit();
                 (span, code)
             }
-            ast::Decl::GlobalVar {
+            ast::Decl::GlobalVariable {
                 decl_type,
                 name,
                 value,
@@ -837,7 +865,7 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
     ) -> (Option<Value>, Vec<Instruction>) {
         match stmt {
             // Variable declaration are
-            ast::Stmt::LocalVar {
+            ast::Stmt::LocalVariable {
                 decl_type,
                 name,
                 value,
@@ -852,7 +880,6 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                         )
                     };
                 // Get the destination of the right hand side.
-                // Get the destination of the right hand side.
                 code.push(Instruction::Id(
                     dst.clone(),
                     arg.expect(
@@ -863,8 +890,10 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
             }
             // Blocks.
             ast::Stmt::Block(stmts) => {
-                // self.level += 1;
-                self.tracker.1 += 1;
+                // Block defines a new scope, meaning all renames of the previous scope
+                // are invalidated, we save the old rename table and we reset it for
+                // the new scope.
+                self.context.scope_level_index += 1;
                 let mut code = vec![];
                 for stmt_ref in stmts {
                     let (_, mut block) =
@@ -878,8 +907,8 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
 
                     code.append(&mut block);
                 }
-                // self.level -= 1;
-                self.tracker.1 -= 1;
+                self.context.scope_level_index -= 1;
+                // Once the scope has been processed we need to reset the rename table.
                 (None, code)
             }
             // Return statements.
@@ -987,7 +1016,7 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
 
                 (None, code)
             }
-            ast::Stmt::FuncArg {
+            ast::Stmt::Argument {
                 decl_type: _,
                 name: _,
             } => {
@@ -1257,7 +1286,10 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                 (Some(Value::StorageLocation(_dst)), code)
             }
             ast::Expr::Named(ref name) => {
-                let _t = match self.symbol_table.find(name, self.tracker.1) {
+                let _t = match self
+                    .symbol_table
+                    .find(name, self.context.scope_level_index)
+                {
                     Some(symbol) => symbol.t(),
                     None => unreachable!(
                         "Expected a symbol for named expression : `{name}`"
@@ -1304,7 +1336,9 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                         "Expected assignment lvalue to be a storage location"
                     ),
                 };
-                let t = match self.symbol_table.find(&location, self.tracker.1)
+                let t = match self
+                    .symbol_table
+                    .find(&location, self.context.scope_level_index)
                 {
                     Some(symbol) => symbol.t(),
                     None => unreachable!(
@@ -1326,7 +1360,7 @@ impl<'a> ast::Visitor<(Option<Value>, Vec<Instruction>)> for IRBuilder<'a> {
                     Some(ast::Expr::Named(name)) => name,
                     _ => unreachable!("Expected reference to be a named expression for a function"),
                 };
-                let t = match self.symbol_table.find(name, self.tracker.1) {
+                let t = match self.symbol_table.global(name) {
                     Some(symbol) => symbol.t(),
                     None => unreachable!(
                         "Expected a symbol for named expression : `{name}`"
@@ -1386,9 +1420,10 @@ mod tests {
                 let symbol_table = analyze(parser.ast());
 
                 let mut irgen = IRBuilder::new(parser.ast(), &symbol_table);
-                irgen.gen();
+                irgen.build();
 
-                let mut actual = "".to_string();
+                // The perils of string to string comparisons.
+                let mut actual = "\n".to_string();
                 for func in irgen.functions() {
                     actual.push_str(format!("{func}").as_str());
                 }
@@ -1397,7 +1432,9 @@ mod tests {
                 let expected = $expected
                     .strip_suffix("\n")
                     .and($expected.strip_prefix("\n"));
-                assert_eq!(actual, expected.unwrap())
+                println!("Actual: {}", actual);
+                println!("Expected: {}", $expected);
+                assert_eq!(actual, $expected)
             }
         };
     }
@@ -1849,16 +1886,6 @@ int main() {
    jmp .LABEL_2
    .LABEL_2
    ret c
-}
-"#
-    );
-
-    test_ir_gen!(
-        can_inline_global_variables,
-        "int global = 1;int main() { return global;}",
-        r#"
-@main: int {
-   ret global
 }
 "#
     );

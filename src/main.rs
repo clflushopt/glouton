@@ -16,7 +16,7 @@ fn compile() {
     parser.parse();
     let symbol_table = sema::analyze(parser.ast());
     let mut irgen = ir::IRBuilder::new(parser.ast(), &symbol_table);
-    irgen.gen();
+    irgen.build();
     for inst in irgen.functions() {
         println!("{inst}");
     }
