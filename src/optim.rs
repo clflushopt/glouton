@@ -1,25 +1,20 @@
-//! This module implements multiple transforms on the glouton IR
-//! mostly focused on scalar optimizations.
-
-use std::collections::{HashMap, HashSet};
+//! Implementation of several scalar optimization passes such as local value
+//! numbering, dead code elimination...
+use std::{
+    collections::{HashMap, HashSet},
+    env::var,
+    ops::Deref,
+};
 
 use crate::{
     cfg::Graph,
-    ir::{self, Literal, OPCode, Symbol},
+    ir::{self, Instruction, Literal, OPCode, Symbol, Value},
 };
-
-struct FunctionRewriter {}
-
-impl FunctionRewriter {
-    fn rewrite(f: &mut ir::Function, transform: &impl Transform) {
-        transform.run(f)
-    }
-}
 
 /// `Transform` trait is used to encapsulate the behavior of independant
 /// optimizations executed on individual functions.
 pub trait Transform {
-    fn run(&self, function: &mut ir::Function) {}
+    fn run(&self, _: &mut ir::Function) {}
 }
 
 /// Identity transform implements the identity transformation which is a noop.
@@ -27,7 +22,7 @@ pub trait Transform {
 struct Identity {}
 
 impl Transform for Identity {
-    fn run(&self, function: &mut ir::Function) {}
+    fn run(&self, _: &mut ir::Function) {}
 }
 
 /// Instruction combination pass executes over basic blocks and tries to
@@ -47,6 +42,36 @@ impl Transform for InstCombine {}
 /// copy propagation, constant folding and common subexpression elimination.
 struct LVN {}
 
+/// Generic data structure that maps entries to monotonically increasing
+/// numbers that act as row identifiers.
+use std::hash::Hash;
+#[derive(Debug, Clone)]
+struct NumberTable<T: Clone + Hash + Eq>(HashMap<T, usize>, usize);
+
+impl<T: Clone + Hash + Eq> NumberTable<T> {
+    fn new() -> Self {
+        Self {
+            0: HashMap::new(),
+            1: 0,
+        }
+    }
+
+    fn get_or_insert(&mut self, key: &T) -> usize {
+        if let Some(value) = self.0.get(key) {
+            return *value;
+        }
+        let value = self.next_number();
+        self.0.insert(key.clone(), value);
+        value
+    }
+
+    fn next_number(&mut self) -> usize {
+        let n = self.1;
+        self.1 += 1;
+        n
+    }
+}
+
 impl LVN {
     /// Run the local value numbering pass to build the value numbering table
     /// then iteratively run peephole optimizations on using the table.
@@ -55,56 +80,152 @@ impl LVN {
         // for the input function.
         let worklist = Graph::form_basic_blocks(function);
 
-        // The data structures used for LVN :
-        // 1. Hashmap from variable names to value numbers.
-        // 2. Hashmap from encoded instructions to their canonical variable names.
+        // The second step involves iterating over the individual basic blocks
+        // and building the value table for each storage location.
         //
-        // Encoding instructions :
-        //
-        // match Inst(Args..) => Inst(VN#) where VN# are value numbers.
-        //
+        // We need two hashmaps to represent our table, one to map variable names
+        // to value numbers and one to map expressions to their original variable
+        // names. Since we use a 3-address code IR every assignments has an lhs
+        // that is a variable name and every instruction we care about has variable
+        // names as arguments.
+
         // ValueNumber act as row numbers in our value numbering table.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
         struct ValueNumber(usize);
 
-        // Value is how we encode the instruction to their tuples.
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-        struct Value(OPCode, ValueNumber, ValueNumber);
+        // Environment maps variable names to value numbers.
+        //
+        // var2num
+        // let environment: HashMap<Symbol, ValueNumber> = HashMap::new();
+        let mut var2num: NumberTable<Symbol> = NumberTable::new();
+        // value2number
+        // let value_table: HashMap<Value, ValueNumber> = HashMap::new();
+        let value2number: HashMap<Value, ValueNumber> = HashMap::new();
+        // num2vars
+        // let variables: HashMap<ValueNumber, Symbol> = HashMap::new();
+        let mut num2vars: HashMap<ValueNumber, Symbol> = HashMap::new();
+        // num2const
+        // let constants: HashMap<ValueNumber, Literal> = HashMap::new();
+        let num2constants: HashMap<ValueNumber, Literal> = HashMap::new();
 
-        #[derive(Debug, Clone)]
-        struct NumberingTable {
-            table: HashMap<ir::Symbol, ValueNumber>,
-            vn: ValueNumber,
-        }
+        for block in worklist {
+            // Compute the list of variable names that are read ebfore they are
+            // written.
+            let read_before_written =
+                Self::read_before_writes(block.instructions());
+            for variable in &read_before_written {
+                let num = var2num.get_or_insert(&variable);
+                num2vars.insert(ValueNumber(num), variable.clone());
+            }
+            println!("Var2Num : {:?}", var2num);
+            println!("Num2Vars: {:?}", num2vars);
 
-        impl Value {
-            fn from(inst: &ir::Instruction) {
-                match inst {
-                    _ => todo!(),
+            for (inst, last_write) in
+                block.instructions().iter().zip(&read_before_written)
+            {
+                // Get the list of operands for the instruction.
+                let (lhs, rhs) = inst.operands();
+                // Lookup the value number for each argument if they have one, otherwise
+                // create new ones.
+                let argnums = match (lhs, rhs) {
+                    (
+                        Some(Value::StorageLocation(lhs)),
+                        Some(Value::StorageLocation(rhs)),
+                    ) => {
+                        let argnums = vec![
+                            var2num.get_or_insert(lhs),
+                            var2num.get_or_insert(rhs),
+                        ];
+                        argnums
+                    }
+                    _ => vec![],
+                };
+                // If the instruction does have operands use the constructed argnums
+                // to build a new instruction.
+                for argnum in argnums {
+                    if let (Some(lhs), Some(rhs)) = inst.operands() {
+                        println!(
+                            "New instruction: {:?} {:?}",
+                            inst.opcode(),
+                            num2vars.get(&ValueNumber(argnum))
+                        )
+                    }
                 }
             }
         }
+    }
 
-        // Environment maps variable names to value numbers.
-        //
-        // TODO: Should potentially live nicely with declarations out of the
-        // current scope and variable arguments.
-        // var2num
-        let environment: HashMap<Symbol, ValueNumber> = HashMap::new();
-        // value2number
-        let value_table: HashMap<Value, ValueNumber> = HashMap::new();
-        // num2vars
-        let variables: HashMap<ValueNumber, Symbol> = HashMap::new();
-        // num2const
-        let constants: HashMap<ValueNumber, Literal> = HashMap::new();
+    fn last_writes(instrs: &[Instruction]) -> Vec<bool> {
+        let mut last_written_to = vec![false; instrs.len()];
+        let mut seen = HashSet::new();
 
-        let encode_instruction = |inst: &ir::Instruction| -> Value {
-            match inst {
-                _ => todo!(),
+        for (index, instr) in instrs.iter().enumerate() {
+            match instr {
+                Instruction::Id(dst, ..)
+                | Instruction::Neg(dst, ..)
+                | Instruction::Not(dst, ..)
+                | Instruction::Const(dst, ..)
+                | Instruction::Or(dst, ..)
+                | Instruction::And(dst, ..)
+                | Instruction::Add(dst, ..)
+                | Instruction::Sub(dst, ..)
+                | Instruction::Mul(dst, ..)
+                | Instruction::Div(dst, ..)
+                | Instruction::Eq(dst, ..)
+                | Instruction::Neq(dst, ..)
+                | Instruction::Gte(dst, ..)
+                | Instruction::Gt(dst, ..)
+                | Instruction::Lte(dst, ..)
+                | Instruction::Lt(dst, ..) => {
+                    if !seen.contains(&dst) {
+                        last_written_to[index] = true;
+                        seen.insert(dst);
+                    }
+                }
+                _ => (),
             }
-        };
+        }
+        last_written_to
+    }
 
-        type SludgedValueNumber = usize;
+    fn read_before_writes(instrs: &[Instruction]) -> Vec<Symbol> {
+        let mut reads = HashSet::new();
+        let mut writes = HashSet::new();
+
+        for inst in instrs {
+            let (lhs, rhs) = inst.operands();
+            let dst = inst.destination();
+
+            match (lhs, rhs) {
+                (
+                    Some(Value::StorageLocation(lhs)),
+                    Some(Value::StorageLocation(rhs)),
+                ) => {
+                    let local_reads = HashSet::from([lhs, rhs]);
+                    let local_reads = local_reads.difference(&writes);
+                    for sym in local_reads {
+                        reads.insert(sym.clone());
+                    }
+                }
+                (Some(Value::StorageLocation(operand)), None)
+                | (None, Some(Value::StorageLocation(operand))) => {
+                    let local_reads = HashSet::from([operand]);
+                    let local_reads = local_reads.difference(&writes);
+                    for sym in local_reads {
+                        reads.insert(sym.clone());
+                    }
+                }
+                _ => (),
+            }
+
+            if let Some(dst) = dst {
+                writes.insert(dst);
+            }
+        }
+
+        println!("Writes: {:?}", writes);
+        println!("Reads: {:?}", reads);
+        reads.iter().cloned().cloned().collect::<_>()
     }
 
     /// Common subexpression elimination pass replaces common subexpressions in
@@ -203,7 +324,7 @@ impl Transform for LoopInvariantCodeMotion {}
 #[cfg(test)]
 mod tests {
     use crate::ir::IRBuilder;
-    use crate::optim::{Identity, Transform, DCE};
+    use crate::optim::{Identity, Transform, DCE, LVN};
     use crate::parser::Parser;
     use crate::scanner::Scanner;
     use crate::sema::analyze;
@@ -226,16 +347,19 @@ mod tests {
 
                 let ident = Identity {};
                 let dce = DCE {};
+                let lvn = LVN {};
 
                 for func in irgen.functions_mut() {
                     ident.run(func);
                     dce.run(func);
+                    lvn.run(func);
                 }
 
                 let mut actual = "".to_string();
                 for func in irgen.functions() {
                     actual.push_str(format!("{func}").as_str());
                 }
+                println!("{}", actual);
                 // For readability trim the newlines at the start and end
                 // of our IR text fixture.
                 let expected = $expected
@@ -390,6 +514,69 @@ mod tests {
    jmp .LABEL_2
    .LABEL_2
    ret c
+}
+"#
+    );
+
+    test_optimization_pass!(
+        can_lvn,
+        r#"
+            int main() {
+                int a = 4;
+                int b = 2;
+                int c = a + b;
+                int d = a - b;
+                int e = c - d;
+                return e;
+            }
+        "#,
+        r#"
+@main: int {
+   %v0: int = const 4
+   a: int = id %v0
+   %v1: int = const 2
+   b: int = id %v1
+   %v2: int = add a b
+   c: int = id %v2
+   %v3: int = sub a b
+   d: int = id %v3
+   %v4: int = sub c d
+   e: int = id %v4
+   ret e
+}
+"#
+    );
+
+    test_optimization_pass!(
+        can_build_valid_read_write_dependency_vectors,
+        r#"
+            int main() {
+                int a = 4;
+                int b = 2;
+                int sum1 = a + b;
+                int sum2 = a + b;
+                int prod1 = sum1 * sum2;
+                
+                sum1 = 0;
+                sum2 = 0;
+
+                int sum3 = a + b;
+                int prod2 = sum3 * sum3;
+
+                return prod2;
+            }
+        "#,
+        r#"
+@main: int {
+   %v0: int = const 4
+   a: int = id %v0
+   %v1: int = const 2
+   b: int = id %v1
+   %v7: int = add a b
+   sum3: int = id %v7
+   %v8: int = mul sum3 sum3
+   prod2: int = id %v8
+   ret prod2
 }
 "#
     );

@@ -8,7 +8,6 @@
 //! `const` and `id` are core to the way the IR is structured as they allow us
 //! to easily translate into and out of SSA form; with potentially translating
 //! out of SSA can forgo the rename phase and just prune all the phi nodes.
-use std::collections::HashMap;
 use std::fmt;
 
 use crate::ast::{self, Visitor};
@@ -51,7 +50,7 @@ impl fmt::Display for Type {
 }
 
 /// Literal values.
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Hash, Clone, Copy, PartialEq, Eq)]
 pub enum Literal {
     /// Empty value.
     #[default]
@@ -120,7 +119,7 @@ impl fmt::Display for Label {
 
 /// Every value in the intermediate representation is either a symbol reference
 /// to a storage location or a literal value.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Value {
     StorageLocation(Symbol),
     ConstantLiteral(Literal),
